@@ -1,0 +1,22 @@
+Instructions to build a list of templates that reftalk will use to ignore the article if it finds inside
+=====
+
+Manually add any templates in:
+
+	~/static/templates-static
+
+Or create an empty file:
+
+	touch ~/static/templates-static
+
+The following will generate a list of target templates and their redirects for:
+
+	https://en.wikipedia.org/wiki/Category:Reference_list_templates
+
+Copy-paste the below while in ~/reftalk directory (not the static subdir). It assumes on Toolforge with BotWikiAwk installed. Adjust paths to GNU awk if elsewhere:
+
+	cat static/templates-static > static/o
+	wikiget -c "Category:Reference_list_templates" >> static/o
+	sort static/o | uniq | /data/project/farotbot/local/bin/gawk -ilibrary '{if(!empty($0) { print $0;print sys2var("wikiget -n10 -B " shquote($0))}}'| grep -viE "(/sandbox|poster|Wikipedia[:]|/doc|[ -]inline)" > static/oo
+	/data/project/farotbot/local/bin/gawk -ilibrary 'BEGIN{for(i=1;i<=splitn("static/oo",a,i);i++) print subs("Template:","",a[i])}' > static/templates
+
