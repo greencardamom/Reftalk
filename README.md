@@ -27,13 +27,18 @@ Installation
 	git clone https://github.com/greencardamom/Reftalk
 
 4. Edit ~/BotWikiAwk/lib/botwiki.awk
+
 	A. Set local URLs in section #1 and #2 
+
 	B. Create a new 'case' entry in section #3, adjust the Home bot path created in step 3:
+
 		case "reftalk":                                             # Custom bot paths
 			Home = "/data/project/projectname/Reftalk/"         # path ends in "/"
 			Agent = UserPage " (ask me about " BotName ")"
 			break
+
 	C. Add a new entry in section #10 (inside the statement if(BotName != "makebot") {} )
+
 		if(BotName !~ /reftalk/) {
 			delete Config
 			readprojectcfg()
@@ -46,9 +51,13 @@ Running
 ========
 
 1. Download a complete "all-pages" (takes a while)
+
  A. On Toolforge:
+
       /usr/bin/qsub -l mem_free=2G,h_vmem=2G -cwd -sync y -e /data/project/botwikiawk/Reftalk/dat/wikiget.stderr -o /data/project/botwikiawk/Reftalk/dat/all-pages /data/project/botwikiawk/BotWikiAwk/bin/wikiget -A -t 2 -k 0
+
  B. On other servers:
+
       wikiget -A -t 2 -k 0 > /data/project/botwikiawk/Reftalk/dat/all-pages
 
 2. Configure settings for the run:
@@ -67,8 +76,11 @@ Running
 3. Run reftalk
 
      If running on Toolforge
+
        /usr/bin/qsub -l mem_free=1G,h_vmem=1G -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -V -cwd /data/project/botwikiawk/Reftalk/reftalk.awk
+
      If running from anywhere else:
+
        ./reftalk.awk > /data/project/botwikiawk/Reftalk/reftalk.stdout
 
 4. Monitor ~/Reftalk/logs 
