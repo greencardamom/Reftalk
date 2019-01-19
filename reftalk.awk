@@ -62,17 +62,17 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm) {
   if(bm == 0) {
 
     # Single page mode. Set to 0 to disable single page mode
-    # sp = "Trinidad and Tobago"
+    # sp = "Experience curve effects"
     sp = 0
 
     # batch size. 1000 default
     bz = 1000
 
     # Start location. Set sz = "0" for first batch, "1000" for second etc..
-    sz = 30000
+    sz = 100000
 
     # End location. Set ez = "1000" for first batch, "2000" for second etc..
-    ez = 40000
+    ez = 130000
 
     for(z = sz + 1; z <= ez; z = z + bz) {
       if(!sp) {
@@ -136,7 +136,7 @@ function reftalk(wikihtml, wikiname,   tfp,i,j,k,l,fp) {
 #
 # Go through each section checking for the canidate
 #
-function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt) {
+function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec) {
 
   # Get index of sections, then step through each one looking for a missing {{relist}} in the content
 
@@ -153,10 +153,6 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
 
       if(jsonaTOC["parse","sections",s,"toclevel"] != 1) continue # skip if not a 1st level section ie. == <section> ==
 
-#      if(jsonaTOC["parse","sections",s,"index"] !~ /^[0-9]{1,4}$/) {
-#        continue  # skip transcluded sections
-#      }
-
       # printf s " "
 
       jsoninSecW = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&rvlimit=1&titles=" urlencodeawk("Talk:" wikiname) "&rvsection=" s "&format=json&formatversion=2&maxlag=5"))
@@ -172,18 +168,30 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
         # print "content = " arrSecW["1"]
 
         if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
+
+          # Check for empty <ref></ref>
+          origSec = arrSecW["1"]
+          gsub(/[<]ref[>][ ]*[<][ ]*\/[ ]*ref[>]/, "", origSec)
+          if(!match(stripnowikicom(origSec), /[<][ ]*ref[ ]*/))
+            continue
+
           i = split(arrSecW["1"], a, "\n")
           if(empty(a[i]))
             mid = ""
           else
             mid = "\n"
           out = arrSecW["1"] mid "\n{{reflist-talk}}"
+          origWS = wikisource
           wikisource = gsubs(arrSecW["1"], out, wikisource)
+          if(origWS == wikisource) {
+            print wikiname " ---- gsubs() failure" >> G["log"] "error"
+            continue
+          }
           edcnt++
 
-          if( ! match(arrSecW["1"], "[=]{2}[ ]*"regesc3(arrTOC[s]))) {  # mis-match caused by transclusions
+          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*"regesc3(arrTOC[s]))) {  # mis-match caused by transclusions
             arrTOC[s] = strip(a[1])
-            gsub(/^[=]{2}[ ]*|[ ]*[=]{2}$/, "", arrTOC[s])
+            gsub(/^[=]{1,2}[ ]*|[ ]*[=]{1,2}$/, "", arrTOC[s])
           }
 
           if(empty(summary))
@@ -199,64 +207,8 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
       summary = "Add " edcnt " " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
     else
       summary = "Add " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
-    upload(wikisource, wikiname, summary)
+    upload(wikisource, wikiname, summary, G["log"], BotName, "en")
   }
-}
-
-#
-# Upload page
-#
-function upload(wikisource, wikiname, summary,   name,command,result,debug,article) {
-
-    debug = 0  # 0 = off, 1 = list discoveries don't upload, 2 = print stderr msgs
-
-    name = "Talk:" strip(wikiname)
-
-    if(debug == 1) {
-      stdErr("Found " name)
-      print name >> G["log"] "discovered"
-      return
-    }
-
-    if(debug == 2) printf("  startbutton - ")
-    if(stopbutton() != "RUN") {
-      print name >> G["log"] "error"
-      return
-    }
-    if(debug == 2) print "endbutton"
-
-    article = G["static"] "article"
-    print wikisource > article
-    close(article)
-
-    if(!empty(name)) {
-
-      for(i = 1; i <= 2; i++) {
-
-        command = "timeout 20s " Exe["wikiget"] " -E " shquote(name) " -S " shquote(summary) " -P " shquote(article) " -l en"
-        if(debug == 2) stdErr(command)
-        result = sys2var(command)
-
-        if(result ~ /success/) {
-          if(debug == 2) stdErr("reftalk.awk: wikiget status: Successful. Page uploaded to Wikipedia. " name)
-          print name >> G["log"] "discovered"
-          break
-        }
-        else if(result ~ /no[-]?change/ ) {
-          if(debug == 2) stdErr("reftalk.awk: wikiget status: No change. " name)
-          print name >> G["log"] "nochange"
-          break
-        }
-        else if(i == 2) {
-          if(debug == 2) stdErr("reftalk.awk: wikiget status: Failure ('" result "') uploading to Wikipedia. " name)
-          print name >> G["log"] "error"
-          break
-        }
-        if(debug == 2) printf("Try 2: " name " - ")
-        sleep(2)
-      }
-    }
-    removefile(article)
 }
 
 #
