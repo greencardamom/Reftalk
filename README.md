@@ -75,7 +75,7 @@ Running
 
      If running on Toolforge from the command-line:
 
-       /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/reftalk/reftalk.stderr -o /data/project/botwikiawk/reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/reftalk /data/project/botwikiawk/reftalk/reftalk.awk
+       /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
 
      If running on Toolforge from cron, the crontab would contain:
 
@@ -86,7 +86,7 @@ Running
        HOME=/data/project/botwikiawk
        LANG=en_US.UTF-8
        LC_COLLATE=en_US.UTF-8
-       37 5 * * 7 /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/reftalk/reftalk.stderr -o /data/project/botwikiawk/reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/reftalk /data/project/botwikiawk/reftalk/reftalk.awk
+       37 5 * * 7 /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
 
      If running from anywhere else (home server etc):
 

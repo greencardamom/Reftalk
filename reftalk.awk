@@ -3,6 +3,8 @@
 #
 # Talk pages needing a {{reflist-talk}}
 #
+#  https://github.com/greencardamom/Reftalk
+#
 
 # The MIT License (MIT)
 #
@@ -58,12 +60,13 @@ BEGIN {
 function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
 
   # batch mode. 0 = for testing small batch or single page. 1 = for production of all-pages
-  bm = 0
+  bm = 1
 
   if(bm == 0) {
 
     # Single page mode. Set to 0 to disable single page mode, or set to name of article
-    # sp = "Croix de Guerre"
+    # sp = "Wikipedia talk:Bots/Requests for approval/GreenC bot 8"
+    # sp = "Hydraulic fracturing by country"
     sp = 0
 
     # batch size. 1000 default
@@ -79,10 +82,13 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
 
       if(!sp) { # batch mode
 
+        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+
         command = Exe["tail"] " -n +" z " " G["dat"] "all-pages | " Exe["head"] " -n " bz " > " G["dat"] "runpages.new"
         sys2var(command)
+
         dn = z "-" z + (bz - 1)
-        print dn " of " ez " " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") >> G["log"] "batch-done"
+        print dn " of " ez " " CurTime >> G["log"] "batch-done"
         close(G["log"] "batch-done")
 
         if( checkexists(G["dat"] "runpages.new") ) {
@@ -97,6 +103,8 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
       }
 
       else {  # single page mode
+
+        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
 
         if(sp !~ Re1)
           reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)) ), sp)
@@ -114,15 +122,25 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
 
   else if(bm == 1) {
 
+    startpoint = 200000
+
     if( checkexists(G["dat"] "all-pages") ) {
-      for(i = 1; i <= splitn(G["dat"] "all-pages", a, i); i++) {
+      for(i = startpoint; i <= splitn(G["dat"] "all-pages", a, i, startpoint); i++) {
+
+        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
 
         # Mark log every 1000 pages
         if(i / 1000 !~ /[.]/) {
           if(empty(la))
             la = length(a)  # How many total articles
-          print i+1 "-" i+1000 " of " la " " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") >> G["log"] "all-pages-done"
+          print i+1 "-" i+1000 " of " la " " CurTime >> G["log"] "all-pages-done"
           close(G["log"] "all-pages-done")
+        }
+
+        # Send heartbeat update-email every 100,000 pages
+        if(i / 100000 !~ /[.]/) {
+          if(!empty(UserEmail) && !empty(Exe["mailx"]))
+            sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " is at " i+1 "-" i+100000 " of " la " " CurTime) " " UserEmail " < /dev/null")
         }
 
         if(wikiname !~ Re1)
@@ -197,14 +215,14 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
           origSec = arrSecW["1"]
           gsub(/[<]ref[>][ ]*[<][ ]*\/[ ]*ref[>]/, "", origSec)
           if(!match(stripnowikicom(origSec), /[<][ ]*ref[ ]*/)) {
-            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- empty <ref></ref> in section \"" arrTOC[s] "\"" >> G["log"] "error"
+            print wikiname " ---- " CurTime " ---- empty <ref></ref> in section \"" arrTOC[s] "\"" >> G["log"] "error"
             continue
           }
 
           # Check for a level-1 section that umbrellas in all level-2's below it - log and skip
           splitn(arrSecW["1"] "\n", b)
           if(b[1] ~ /[^=][=]$/) {
-            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- Level-1 error in section \"" arrTOC[s] "\"" >> G["log"] "error"
+            print wikiname " ---- " CurTime " ---- Level-1 error in section \"" arrTOC[s] "\"" >> G["log"] "error"
             continue
           }
 
@@ -220,7 +238,7 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
           origWS = wikisource
           wikisource = gsubs(arrSecW["1"], out, wikisource)
           if(origWS == wikisource) {
-            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- gsubs() failure" >> G["log"] "error"
+            print wikiname " ---- " CurTime " ---- gsubs() failure" >> G["log"] "error"
             continue
           }
           edcnt++
