@@ -94,4 +94,13 @@ Running
 
 4. Monitor ~/Reftalk/logs 
 
+5. To stop and restart
 
+     To stop on Toolforge
+
+       qstat  (display the job number)
+       qdel <job #>
+
+     To restart, find which line-number in all-pages it lasted processed (look in ~/log/all-pages-done)
+   
+     In reftalk.awk, modify "startpoint" to that line number. Restart as in step #3.

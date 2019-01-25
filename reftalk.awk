@@ -122,17 +122,22 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
 
   else if(bm == 1) {
 
-    startpoint = 200000
+    # If aborted part-way through, this will restart at an offset (the line number in all-pages)
+    # Set to 1 on the first run
+    startpoint = 1
 
     if( checkexists(G["dat"] "all-pages") ) {
+
       for(i = startpoint; i <= splitn(G["dat"] "all-pages", a, i, startpoint); i++) {
 
-        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+        # print i >> G["log"] "all-pages.debug"
+        # close(G["log"] "all-pages.debug")
 
         # Mark log every 1000 pages
         if(i / 1000 !~ /[.]/) {
           if(empty(la))
             la = length(a)  # How many total articles
+          CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
           print i+1 "-" i+1000 " of " la " " CurTime >> G["log"] "all-pages-done"
           close(G["log"] "all-pages-done")
         }
@@ -210,6 +215,8 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
         # print "content = " arrSecW["1"]
 
         if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && match(stripnowikicom(arrSecW["1"]), /[<][ ]*\/[ ]*ref[ ]*[>]/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
+
+          CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
 
           # Check for empty <ref></ref>
           origSec = arrSecW["1"]
