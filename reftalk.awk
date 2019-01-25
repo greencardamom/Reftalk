@@ -42,11 +42,12 @@ BEGIN {
 
   delete G
 
-  G["email"]  = "dfgf56greencard93@nym.hush.com"
-  G["path"]   = Home  # Defined in botwiki.awk
+  G["path"]   = Home                    # Defined in botwiki.awk
   G["dat"]    = G["path"] "dat/"
   G["static"] = G["path"] "static/"
   G["log"]    = G["path"] "log/"
+
+  Re1 = "^(Wikipedia talk[:]|User talk[:])"
 
   loadtemplates()
 
@@ -54,28 +55,30 @@ BEGIN {
 
 }
 
-function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm) {
+function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
 
   # batch mode. 0 = for testing small batch or single page. 1 = for production of all-pages
   bm = 0
 
   if(bm == 0) {
 
-    # Single page mode. Set to 0 to disable single page mode
-    # sp = "Experience curve effects"
+    # Single page mode. Set to 0 to disable single page mode, or set to name of article
+    # sp = "Croix de Guerre"
     sp = 0
 
     # batch size. 1000 default
     bz = 1000
 
     # Start location. Set sz = "0" for first batch, "1000" for second etc..
-    sz = 100000
+    sz = 130000
 
     # End location. Set ez = "1000" for first batch, "2000" for second etc..
-    ez = 130000
+    ez = 200000
 
     for(z = sz + 1; z <= ez; z = z + bz) {
-      if(!sp) {
+
+      if(!sp) { # batch mode
+
         command = Exe["tail"] " -n +" z " " G["dat"] "all-pages | " Exe["head"] " -n " bz " > " G["dat"] "runpages.new"
         sys2var(command)
         dn = z "-" z + (bz - 1)
@@ -85,32 +88,47 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm) {
         if( checkexists(G["dat"] "runpages.new") ) {
           for(i=1; i <= splitn(G["dat"] "runpages.new", a, i); i++) {
             # stdErr("Processing " a[i])
-            reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
+            if(wikiname !~ Re1)
+              reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
+            else
+              reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(a[i])) ), a[i])
           }
         }
       }
-      else {  # single page
-        reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)) ), sp)
+
+      else {  # single page mode
+
+        if(sp !~ Re1)
+          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)) ), sp)
+        else
+          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(sp)) ), sp)
         exit
       }
     }
   }
 
   # Production run all-pages
-  # Although loading all-pages into memory is consumptive, it's cheaper than the tail -n +line
-  # technique which is exspensive and slow when moving deeper into the file. Large batches would
-  # mitigate that some, but then there would be some missing towards the end.
+  #  Although loading all-pages into memory is consumptive, it's cheaper than the tail -n +line
+  #  technique which is exspensive and slow when moving deeper into the file. Large batches would
+  #  mitigate that some, but then there would be some missing towards the end.
 
   else if(bm == 1) {
+
     if( checkexists(G["dat"] "all-pages") ) {
       for(i = 1; i <= splitn(G["dat"] "all-pages", a, i); i++) {
 
-        # Log-mark every 1000 pages
+        # Mark log every 1000 pages
         if(i / 1000 !~ /[.]/) {
-          print i " " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") >> G["log"] "all-pages-done"
+          if(empty(la))
+            la = length(a)  # How many total articles
+          print i+1 "-" i+1000 " of " la " " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") >> G["log"] "all-pages-done"
           close(G["log"] "all-pages-done")
         }
-        reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
+
+        if(wikiname !~ Re1)
+          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
+        else
+          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(a[i])) ), a[i])
       }
     }
   }
@@ -123,7 +141,10 @@ function reftalk(wikihtml, wikiname,   tfp,i,j,k,l,fp) {
 
   tfp = stripwikicomments(wikihtml)
   j = gsub(/<[ ]*ol[ ]*class[ ]*[=][ ]*"references"[ ]*[>]/, "", tfp)
-  fp = sys2var(Exe["wikiget"] " -w " shquote("Talk:" wikiname) )
+  if(wikiname !~ Re1)
+    fp = sys2var(Exe["wikiget"] " -w " shquote("Talk:" wikiname) )
+  else
+    fp = sys2var(Exe["wikiget"] " -w " shquote(wikiname) )
   tfp = stripnowikicom(fp)
   if(gsub(G["templates"], "", tfp) < j) {
     addreftalk(fp, wikiname)
@@ -136,11 +157,16 @@ function reftalk(wikihtml, wikiname,   tfp,i,j,k,l,fp) {
 #
 # Go through each section checking for the canidate
 #
-function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec) {
+function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b) {
+
+  if(wikiname !~ Re1)
+    apiwikiname = "Talk:" wikiname
+  else
+    apiwikiname = wikiname
 
   # Get index of sections, then step through each one looking for a missing {{relist}} in the content
 
-  jsoninTOC = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=parse&page=" urlencodeawk("Talk:" wikiname) "&prop=sections&format=json&formatversion=2&maxlag=5"))
+  jsoninTOC = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=parse&page=" urlencodeawk(apiwikiname) "&prop=sections&format=json&formatversion=2&maxlag=5"))
 
   if( query_json(jsoninTOC, jsonaTOC) >= 0) {
 
@@ -153,9 +179,7 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
 
       if(jsonaTOC["parse","sections",s,"toclevel"] != 1) continue # skip if not a 1st level section ie. == <section> ==
 
-      # printf s " "
-
-      jsoninSecW = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&rvlimit=1&titles=" urlencodeawk("Talk:" wikiname) "&rvsection=" s "&format=json&formatversion=2&maxlag=5"))
+      jsoninSecW = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&rvlimit=1&titles=" urlencodeawk(apiwikiname) "&rvsection=" s "&format=json&formatversion=2&maxlag=5"))
 
       if( query_json(jsoninSecW, jsonaSecW) >= 0) {
 
@@ -167,47 +191,71 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
         # print "title   = " arrTOC[s]
         # print "content = " arrSecW["1"]
 
-        if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
+        if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && match(stripnowikicom(arrSecW["1"]), /[<][ ]*\/[ ]*ref[ ]*[>]/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
 
           # Check for empty <ref></ref>
           origSec = arrSecW["1"]
           gsub(/[<]ref[>][ ]*[<][ ]*\/[ ]*ref[>]/, "", origSec)
-          if(!match(stripnowikicom(origSec), /[<][ ]*ref[ ]*/))
+          if(!match(stripnowikicom(origSec), /[<][ ]*ref[ ]*/)) {
+            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- empty <ref></ref> in section \"" arrTOC[s] "\"" >> G["log"] "error"
             continue
+          }
 
-          i = split(arrSecW["1"], a, "\n")
+          # Check for a level-1 section that umbrellas in all level-2's below it - log and skip
+          splitn(arrSecW["1"] "\n", b)
+          if(b[1] ~ /[^=][=]$/) {
+            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- Level-1 error in section \"" arrTOC[s] "\"" >> G["log"] "error"
+            continue
+          }
+
+          # Determine if line-break needed between body of text and template
+          i = splitn(arrSecW["1"], a)
           if(empty(a[i]))
             mid = ""
           else
             mid = "\n"
+
+          # Add the template, check and log if error
           out = arrSecW["1"] mid "\n{{reflist-talk}}"
           origWS = wikisource
           wikisource = gsubs(arrSecW["1"], out, wikisource)
           if(origWS == wikisource) {
-            print wikiname " ---- gsubs() failure" >> G["log"] "error"
+            print wikiname " ---- " sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"") " ---- gsubs() failure" >> G["log"] "error"
             continue
           }
           edcnt++
 
-          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*"regesc3(arrTOC[s]))) {  # mis-match caused by transclusions
+          # mis-match caused by transclusions
+          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*" regesc3(arrTOC[s]))) {
             arrTOC[s] = strip(a[1])
             gsub(/^[=]{1,2}[ ]*|[ ]*[=]{1,2}$/, "", arrTOC[s])
           }
 
           if(empty(summary))
-            summary = "{{[[Template:reflist-talk|reflist-talk]]}} to [[Talk:" urlencodeawk(wikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
+            summary = "{{[[Template:reflist-talk|reflist-talk]]}} to [[" urlencodeawk(apiwikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
           else
-            summary = summary " and [[Talk:" urlencodeawk(wikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
+            summary = summary " and [[" urlencodeawk(apiwikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
         }
       }
     }
   }
+
   if(summary) {
-    if(edcnt > 1)
-      summary = "Add " edcnt " " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
-    else
-      summary = "Add " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
-    upload(wikisource, wikiname, summary, G["log"], BotName, "en")
+
+    if(length(summary) > 400) {  # Exceeds limit see Help:Edit_summary#The_500-character_limit
+      if(edcnt > 1)
+        summary = "Add " edcnt " {{[[Template:reflist-talk|reflist-talk]]}} (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+      else
+        summary = "Add 1 {{[[Template:reflist-talk|reflist-talk]]}} (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+    }
+    else {
+      if(edcnt > 1)
+        summary = "Add " edcnt " " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+      else
+        summary = "Add " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+    }
+
+    upload(wikisource, apiwikiname, summary, G["log"], BotName, "en")
   }
 }
 
