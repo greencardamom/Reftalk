@@ -75,18 +75,20 @@ Running
 
      If running on Toolforge from the command-line:
 
-       /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
+       /usr/bin/jsub -once -quiet -N cron-tools.botwikiawk-1 -l mem_free=100M,h_vmem=200M -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -v "AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib" -v "PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin" -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
 
      If running on Toolforge from cron, the crontab would contain:
 
        SHELL=/bin/bash
        PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin
        AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib
-       MAILTO= an email address for reporting when cron runs
+       MAILTO= an email address for reporting when cron runs (this is disabled with -quiet)
        HOME=/data/project/botwikiawk
        LANG=en_US.UTF-8
        LC_COLLATE=en_US.UTF-8
-       37 5 * * 7 /usr/bin/qsub -l mem_free=2G,h_vmem=2G -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -V -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
+       0,5,10,15,20,25,30,35,40,45,50,55 * * * * /usr/bin/jsub -once -continuous -quiet -N cron-tools.botwikiawk-1 -l mem_free=100M,h_vmem=200M -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -v "AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib" -v "PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin" -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
+
+     Check every 5 minutes it is running and restart if not. When restarted, it picks up where left off by looking at the last line of ~/log/all-pages-done -- it will log restarts in ~/log/error
 
      If running from anywhere else (home server etc):
 
@@ -101,6 +103,4 @@ Running
        qstat  (display the job number)
        qdel <job #>
 
-     To restart, find which line-number in all-pages it lasted processed (look in ~/log/all-pages-done)
-   
-     In reftalk.awk, modify "startpoint" to that line number. Restart as in step #3.
+     To restart, see above. It will pick up where it left off. 

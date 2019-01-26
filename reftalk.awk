@@ -55,9 +55,11 @@ BEGIN {
 
   main()
 
+  exit 0
+
 }
 
-function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
+function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl,article,al,artblock) {
 
   # batch mode. 0 = for testing small batch or single page. 1 = for production of all-pages
   bm = 1
@@ -110,50 +112,97 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la) {
           reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)) ), sp)
         else
           reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(sp)) ), sp)
-        exit
+        exit 0
       }
     }
   }
 
-  # Production run all-pages
-  #  Although loading all-pages into memory is consumptive, it's cheaper than the tail -n +line
-  #  technique which is exspensive and slow when moving deeper into the file. Large batches would
-  #  mitigate that some, but then there would be some missing towards the end.
+  # Run all-pages
+  #  Below method designed to minimize memory on Toolforge grid, keep log files small, and gracefully handle
+  #  frequent stops by the Grid. But also works as-is on any server.
+  #   all-pages = file containing complete list of millions of article titles. See setup instructions.
+  #   all-pages.done = permanent log. One line equates to 1000 articles processed.
+  #   all-pages.offset = temporary log. One line equates to one article processed. This rolls over with
+  #                      each new 1000 block. If the bot halts mid-way through, it will pick up where left off.
 
   else if(bm == 1) {
 
-    # If aborted part-way through, this will restart at an offset (the line number in all-pages)
-    # Set to 1 on the first run
-    startpoint = 1
+    # Establish startpoint ie. the line number in all-pages where processing will begin
 
-    if( checkexists(G["dat"] "all-pages") ) {
+    # To manually set startpoint. Set along a 1000 boundary ending in 1 eg. 501001 OK. 501100 !OK
+    # startpoint = 202001
 
-      for(i = startpoint; i <= splitn(G["dat"] "all-pages", a, i, startpoint); i++) {
+    # To auto pick-up where it left-off, find startpoint in all-pages.done
+    if(empty(startpoint) && checkexists(G["log"] "all-pages.done")) {
+      startpoint = sys2var(Exe["tail"] " -n 1 " G["log"] "all-pages.done | " Exe["grep"] " -oE \"^[^-]*[^-]\"")
+      if(!isanumber(startpoint)) {  # log corrupted
+        sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " unable to restart") " " UserEmail " < /dev/null")
+        exit 0
+      }
+      CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+      print CurTime " ---- Bot (re)start (" startpoint "-" startpoint + 999 ")" >> G["log"] "restart"
+      close(G["log"] "restart")
+    }
 
-        # print i >> G["log"] "all-pages.debug"
-        # close(G["log"] "all-pages.debug")
+    # All else fails (eg. first run) start at 1
+    if(empty(startpoint))
+      startpoint = 1
 
-        # Mark log every 1000 pages
-        if(i / 1000 !~ /[.]/) {
-          if(empty(la))
-            la = length(a)  # How many total articles
-          CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
-          print i+1 "-" i+1000 " of " la " " CurTime >> G["log"] "all-pages-done"
-          close(G["log"] "all-pages-done")
+    if (checkexists(G["dat"] "all-pages") ) {
+
+      # Check for offset ie. bot halted mid-way through a block
+      if (checkexists(G["log"] "all-pages.offset")) {
+        offset = wc(G["log"] "all-pages.offset")
+        if(offset == 0 || offset == 1000)
+          offset = 1
+        removefile2(G["log"] "all-pages.offset")
+      }
+      else
+        offset = 1
+
+      # Iterate through all-pages creating blocks of 1000 articles each
+      for(bl = startpoint; bl > 0; bl += 1000) {
+
+        # Retrieve a 1000 block from all-pages
+        artblock = sys2var(Exe["tail"] " -n +" bl " " G["dat"] "all-pages | " Exe["head"] " -n 1000")
+
+        # Reached end of all-pages
+        if(length(artblock) < 1000)
+          endall = 1
+
+        # Log block at all-pages.done
+        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+        print bl "-" bl+999 " " CurTime >> G["log"] "all-pages.done"
+        close(G["log"] "all-pages.done")
+
+        # Iterate through 1..1000 individual articles in artblock
+        for(al = offset; al <= splitn(artblock "\n", article, al, offset); al++) {
+
+          # Log offset file
+          print al >> G["log"] "all-pages.offset"
+          close(G["log"] "all-pages.offset")
+
+          # Log debug file (optional)
+          # print bl "-" bl+999 " " al >> G["log"] "all-pages.debug"
+          # close(G["log"] "all-pages.debug")
+
+          # Run reftalk on given article title
+          if(wikiname !~ Re1)
+            reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(article[al])) ), article[al])
+          else
+            reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(article[al])) ), article[al])
         }
 
-        # Send heartbeat update-email every 100,000 pages
-        if(i / 100000 !~ /[.]/) {
-          if(!empty(UserEmail) && !empty(Exe["mailx"]))
-            sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " is at " i+1 "-" i+100000 " of " la " " CurTime) " " UserEmail " < /dev/null")
-        }
+        # Successful completion of 1000 articles, clear offset file
+        removefile2(G["log"] "all-pages.offset")
+        offset = 1
 
-        if(wikiname !~ Re1)
-          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
-        else
-          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(a[i])) ), a[i])
+        # Reached end of all-pages, quit
+        if(endall)
+          break
       }
     }
+    sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " has completed processing all articles!") " " UserEmail " < /dev/null")
   }
 }
 
