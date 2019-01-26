@@ -67,7 +67,7 @@ Running
        If testing a range (eg. first 10,000 pages from all-pages):
          bm = 0
          sp = 0
-         bz=1000, sz=0, ez=10000, sp=0
+         bz=1000, sz=0, ez=10000
        If running the complete "all-pages":
          bm = 1
 
@@ -88,7 +88,7 @@ Running
        LC_COLLATE=en_US.UTF-8
        0,5,10,15,20,25,30,35,40,45,50,55 * * * * /usr/bin/jsub -once -continuous -quiet -N cron-tools.botwikiawk-1 -l mem_free=100M,h_vmem=200M -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -v "AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib" -v "PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin" -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
 
-     Check every 5 minutes it is running and restart if not. When restarted, it picks up where left off by looking at the last line of ~/log/all-pages-done -- it will log restarts in ~/log/error
+     ie. check every 5 minutes it is still running and restart if not. 
 
      If running from anywhere else (home server etc):
 
@@ -103,4 +103,4 @@ Running
        qstat  (display the job number)
        qdel <job #>
 
-     To restart, see above. It will pick up where it left off. 
+     To restart, see above. It will pick up where it left off. Restarts logged in ~/log/restarts
