@@ -135,10 +135,17 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
     # To auto pick-up where it left-off, find startpoint in all-pages.done
     if(empty(startpoint) && checkexists(G["log"] "all-pages.done")) {
       startpoint = sys2var(Exe["tail"] " -n 1 " G["log"] "all-pages.done | " Exe["grep"] " -oE \"^[^-]*[^-]\"")
+
+      if(startpoint ~ /endall/) {    # reached the end
+        sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " already reached the end. Aborted run.") " " UserEmail " < /dev/null")
+        exit 0
+      }
+
       if(!isanumber(startpoint)) {  # log corrupted
         sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " unable to restart") " " UserEmail " < /dev/null")
         exit 0
       }
+
       CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
       print CurTime " ---- Bot (re)start (" startpoint "-" startpoint + 999 ")" >> G["log"] "restart"
       close(G["log"] "restart")
@@ -198,8 +205,10 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
         offset = 1
 
         # Reached end of all-pages, quit
-        if(endall)
+        if(endall) {
+          print "endall" >> G["log"] "all-pages.done"
           break
+        }
       }
     }
     sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " has completed processing all articles!") " " UserEmail " < /dev/null")

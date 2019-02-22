@@ -103,4 +103,4 @@ Running
        qstat  (display the job number)
        qdel <job #>
 
-     To restart, see above. It will pick up where it left off. Restarts logged in ~/log/restarts
+     To restart, see step #3. It will pick up where it left off. Restarts logged in ~/log/restarts
