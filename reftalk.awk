@@ -1,4 +1,4 @@
-#!/data/project/farotbot/local/bin/gawk -bE
+#!/usr/local/bin/gawk -bE
 
 #
 # Talk pages needing a {{reflist-talk}}

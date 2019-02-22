@@ -18,9 +18,9 @@ Requirements
 Installation
 ========
 
-1. Install BotWikiAwk and follow setup instructions. Add OAuth credentials to wikiget.
+1. Install BotWikiAwk and follow setup instructions, including adding OAuth credentials to wikiget.
 
-2. Clone Reftalk. For example:
+2. Clone Reftalk for example:
 	git clone https://github.com/greencardamom/Reftalk
 
 3. Edit ~/BotWikiAwk/lib/botwiki.awk
