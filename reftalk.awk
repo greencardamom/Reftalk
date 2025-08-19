@@ -41,6 +41,7 @@ BEGIN {
 BEGIN {
 
   IGNORECASE = 1
+  Agent = "reftalk BotWikiAwk"
 
   delete G
 
