@@ -33,22 +33,46 @@ BEGIN {
   BotName = "reftalk"
 }
 
+BEGIN { # Bot cfg
+
+  _defaults = "home      = /home/greenc/toolforge/reftalk/ \
+               emailfp   = /home/greenc/scripts/secrets/greenc.email \
+               userid    = User:GreenC \
+               version   = 1.0 \
+               copyright = 2026"
+
+  asplit(G, _defaults, "[ ]*[=][ ]*", "[ ]{9,}")
+  BotName = "reftalk"
+  Home = G["home"]
+  Engine = 3
+
+  # Agent string format non-compliance could result in 429 (too many requests) rejections by WMF API
+  Agent = BotName "-" G["version"] "-" G["copyright"] " (" G["userid"] "; mailto:" strip(readfile(G["emailfp"])) ")"
+
+  IGNORECASE = 1
+
+  G["dat"]    = G["home"] "dat/"
+  G["static"] = G["home"] "static/"
+  G["log"]    = G["home"] "log/"
+  G["re1"]    = "^(Wikipedia talk[:]|User talk[:])"
+  G["path"]   = G["home"]
+
+  # Timestamp when the program last ran. Generate via:
+  #  awk -ilibrary 'BEGIN{s = "20210201"; print strftime("%s", mktime(substr(s, 1, 4) " " substr(s, 5, 2) " " substr(s, 7, 2) " 0 0 0"), 1)}'
+
+  # 2024-03-01  (timestamp of the old all-pages file)
+  G["laststamp"] = "1740823200"
+
+  IGNORECASE = 1
+
+}
+
 @include "botwiki.awk"
 @include "atools.awk"
 @include "json.awk"
 @include "library.awk"
 
 BEGIN {
-
-  IGNORECASE = 1
-  Agent = "reftalk BotWikiAwk"
-
-  delete G
-
-  G["path"]   = Home                    # Defined in botwiki.awk
-  G["dat"]    = G["path"] "dat/"
-  G["static"] = G["path"] "static/"
-  G["log"]    = G["path"] "log/"
 
   Re1 = "^(Wikipedia talk[:]|User talk[:])"
 
