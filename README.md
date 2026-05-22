@@ -1,7 +1,7 @@
 Reftalk
 ===================
 by User:GreenC (en.wikipedia.org)
-Copyright 2019
+Copyright 2019-2026
 MIT License
 
 Info

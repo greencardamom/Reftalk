@@ -1,4 +1,4 @@
-#!/usr/local/bin/gawk -bE
+#!/usr/local/bin/gawk -bE   
 
 #
 # Talk pages needing a {{reflist-talk}}
@@ -8,7 +8,7 @@
 
 # The MIT License (MIT)
 #
-# Copyright (c) 2019 by User:GreenC (at en.wikipedia.org)
+# Copyright (c) 2019-2026 by User:GreenC (at en.wikipedia.org)
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,17 +28,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-# set bot name before @includes
-BEGIN {
-  BotName = "reftalk"
-}
-
 BEGIN { # Bot cfg
 
   _defaults = "home      = /home/greenc/toolforge/reftalk/ \
                emailfp   = /home/greenc/scripts/secrets/greenc.email \
                userid    = User:GreenC \
-               version   = 1.0 \
+               version   = 2.0 \
                copyright = 2026"
 
   asplit(G, _defaults, "[ ]*[=][ ]*", "[ ]{9,}")
@@ -55,7 +50,6 @@ BEGIN { # Bot cfg
   G["static"] = G["home"] "static/"
   G["log"]    = G["home"] "log/"
   G["re1"]    = "^(Wikipedia talk[:]|User talk[:])"
-  G["path"]   = G["home"]
 
   # Timestamp when the program last ran. Generate via:
   #  awk -ilibrary 'BEGIN{s = "20210201"; print strftime("%s", mktime(substr(s, 1, 4) " " substr(s, 5, 2) " " substr(s, 7, 2) " 0 0 0"), 1)}'
@@ -63,18 +57,14 @@ BEGIN { # Bot cfg
   # 2024-03-01  (timestamp of the old all-pages file)
   G["laststamp"] = "1740823200"
 
-  IGNORECASE = 1
-
 }
 
 @include "botwiki.awk"
+@include "library.awk"
 @include "atools.awk"
 @include "json.awk"
-@include "library.awk"
 
 BEGIN {
-
-  Re1 = "^(Wikipedia talk[:]|User talk[:])"
 
   loadtemplates()
 
@@ -88,7 +78,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 
   # batch mode. 0 = for testing small batch or single page. 1 = for production of all-pages
   bm = 1
-
+  
   if(bm == 0) {
 
     # Single page mode. Set to 0 to disable single page mode, or set to name of article
@@ -97,10 +87,10 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
     sp = 0
 
     # batch size. 1000 default
-    bz = 1000
+    bz = 1000  
 
-    # Start location. Set sz = "0" for first batch, "1000" for second etc..
-    sz = 130000
+    # Start location. Set sz = "0" for first batch, "1000" for second etc..                
+    sz = 130000     
 
     # End location. Set ez = "1000" for first batch, "2000" for second etc..
     ez = 200000
@@ -117,14 +107,14 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
         dn = z "-" z + (bz - 1)
         print dn " of " ez " " CurTime >> G["log"] "batch-done"
         close(G["log"] "batch-done")
-
+      
         if( checkexists(G["dat"] "runpages.new") ) {
           for(i=1; i <= splitn(G["dat"] "runpages.new", a, i); i++) {
             # stdErr("Processing " a[i])
-            if(wikiname !~ Re1)
-              reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])) ), a[i])
-            else
-              reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(a[i])) ), a[i])
+            if(wikiname !~ G["re1"]) 
+              reftalk(http2var("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(a[i])), a[i])
+            else 
+              reftalk(http2var("https://en.wikipedia.org/wiki/" urlencodeawk(a[i])), a[i])
           }
         }
       }
@@ -133,41 +123,41 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 
         CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
 
-        if(sp !~ Re1)
-          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)) ), sp)
-        else
-          reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(sp)) ), sp)
+        if(sp !~ G["re1"]) 
+          reftalk(http2var("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(sp)), sp)
+        else 
+          reftalk(http2var("https://en.wikipedia.org/wiki/" urlencodeawk(sp)), sp)
         exit 0
       }
     }
   }
-
+  
   # Run all-pages
-  #  Below method designed to minimize memory on Toolforge grid, keep log files small, and gracefully handle
-  #  frequent stops by the Grid. But also works as-is on any server.
+  #  Below method of processing all-pages (5+ million lines) is designed to minimize memory on Toolforge grid, 
+  #  keep log files small, and gracefully handles frequent stops by the grid. But also works on any server.
   #   all-pages = file containing complete list of millions of article titles. See setup instructions.
   #   all-pages.done = permanent log. One line equates to 1000 articles processed.
-  #   all-pages.offset = temporary log. One line equates to one article processed. This rolls over with
+  #   all-pages.offset = temporary log. One line equates to one article processed. This resets to 0-len with
   #                      each new 1000 block. If the bot halts mid-way through, it will pick up where left off.
 
-  else if(bm == 1) {
+  else if(bm == 1) {  
 
-    # Establish startpoint ie. the line number in all-pages where processing will begin
+    # Establish startpoint ie. the line number in all-pages where processing will begin 
 
     # To manually set startpoint. Set along a 1000 boundary ending in 1 eg. 501001 OK. 501100 !OK
     # startpoint = 202001
 
-    # To auto pick-up where it left-off, find startpoint in all-pages.done
+    # To auto start where it left-off, use last entry in all-pages.done as block startpoint
     if(empty(startpoint) && checkexists(G["log"] "all-pages.done")) {
       startpoint = sys2var(Exe["tail"] " -n 1 " G["log"] "all-pages.done | " Exe["grep"] " -oE \"^[^-]*[^-]\"")
 
       if(startpoint ~ /endall/) {    # reached the end
-        sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " already reached the end. Aborted run.") " " UserEmail " < /dev/null")
+        email(Exe["from_email"], Exe["to_email"], "NOTIFY: " BotName " already reached the end. Aborted run.", "")
         exit 0
       }
 
       if(!isanumber(startpoint)) {  # log corrupted
-        sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " unable to restart") " " UserEmail " < /dev/null")
+        email(Exe["from_email"], Exe["to_email"], "NOTIFY: " BotName " unable to restart", "")
         exit 0
       }
 
@@ -182,11 +172,13 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 
     if (checkexists(G["dat"] "all-pages") ) {
 
-      # Check for offset ie. bot halted mid-way through a block
+      # Check for offset ie. bot previously halted mid-way through a block
       if (checkexists(G["log"] "all-pages.offset")) {
-        offset = wc(G["log"] "all-pages.offset")
-        if(offset == 0 || offset == 1000)
+        offset = wc(G["log"] "all-pages.offset") 
+        if(offset == 0)
           offset = 1
+        if(offset == 999 || offset == 1000)
+          offset = 998
         removefile2(G["log"] "all-pages.offset")
       }
       else
@@ -195,22 +187,22 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
       # Iterate through all-pages creating blocks of 1000 articles each
       for(bl = startpoint; bl > 0; bl += 1000) {
 
-        # Retrieve a 1000 block from all-pages
+        # Retrieve a 1000 block from all-pages - unix tail/head is most efficient 
         artblock = sys2var(Exe["tail"] " -n +" bl " " G["dat"] "all-pages | " Exe["head"] " -n 1000")
 
-        # Reached end of all-pages
+        # Reached the end of all-pages?
         if(length(artblock) < 1000)
           endall = 1
 
-        # Log block at all-pages.done
+        # Log the block at all-pages.done
         CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
         print bl "-" bl+999 " " CurTime >> G["log"] "all-pages.done"
         close(G["log"] "all-pages.done")
 
-        # Iterate through 1..1000 individual articles in artblock
+        # Iterate through the 1..1000 individual articles in artblock
         for(al = offset; al <= splitn(artblock "\n", article, al, offset); al++) {
-
-          # Log offset file
+         
+          # Log to offset file
           print al >> G["log"] "all-pages.offset"
           close(G["log"] "all-pages.offset")
 
@@ -218,17 +210,34 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
           # print bl "-" bl+999 " " al >> G["log"] "all-pages.debug"
           # close(G["log"] "all-pages.debug")
 
-          # Run reftalk on given article title
-          if(wikiname !~ Re1)
-            reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(article[al])) ), article[al])
+          # Skip if page has not been edited since last time bot ran 
+          ls = laststamp("Talk:" article[al])
+          if(!empty(ls) && ls != 0) {
+            if( int(ls) < int(G["laststamp"])) {
+              #print "Warning: laststamp (" ls ") exceeded (" article[al] ") ---- " CurTime >> G["log"] "syslog"
+              #close(G["log"] "syslog")
+              continue
+            }
+            else {
+              #print "Info: laststamp (" ls ") in range (" article[al] ") ---- " CurTime >> G["log"] "syslog"
+              #close(G["log"] "syslog")
+            }
+          }
+          else { # No talk page probably, see laststamp() for logged error messages
+            continue
+          }
+
+          # Run bot on given article title
+          if(wikiname !~ G["re1"])
+            reftalk(http2var("https://en.wikipedia.org/wiki/Talk:" urlencodeawk(article[al])), article[al])
           else
-            reftalk(sys2var(Exe["wget"] " -q -O- " shquote("https://en.wikipedia.org/wiki/" urlencodeawk(article[al])) ), article[al])
+            reftalk(http2var("https://en.wikipedia.org/wiki/" urlencodeawk(article[al])), article[al])
         }
 
         # Successful completion of 1000 articles, clear offset file
         removefile2(G["log"] "all-pages.offset")
         offset = 1
-
+ 
         # Reached end of all-pages, quit
         if(endall) {
           print "endall" >> G["log"] "all-pages.done"
@@ -236,7 +245,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
         }
       }
     }
-    sys2var(Exe["mailx"] " -s " shquote("NOTIFY: " BotName " has completed processing all articles!") " " UserEmail " < /dev/null")
+    email(Exe["from_email"], Exe["to_email"], "NOTIFY: " BotName " has completed processing all articles!", "")
   }
 }
 
@@ -247,10 +256,14 @@ function reftalk(wikihtml, wikiname,   tfp,i,j,k,l,fp) {
 
   tfp = stripwikicomments(wikihtml)
   j = gsub(/<[ ]*ol[ ]*class[ ]*[=][ ]*"references"[ ]*[>]/, "", tfp)
-  if(wikiname !~ Re1)
+  if(j == 0)           # abort early - no refs on page
+    return 0
+
+  if(wikiname !~ G["re1"]) 
     fp = sys2var(Exe["wikiget"] " -w " shquote("Talk:" wikiname) )
-  else
+  else 
     fp = sys2var(Exe["wikiget"] " -w " shquote(wikiname) )
+
   tfp = stripnowikicom(fp)
   if(gsub(G["templates"], "", tfp) < j) {
     addreftalk(fp, wikiname)
@@ -261,18 +274,18 @@ function reftalk(wikihtml, wikiname,   tfp,i,j,k,l,fp) {
 }
 
 #
-# Go through each section checking for the canidate
+# Go through each section checking for the canidate 
 #
-function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b) {
+function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b) {
 
-  if(wikiname !~ Re1)
+  if(wikiname !~ G["re1"]) 
     apiwikiname = "Talk:" wikiname
-  else
+  else 
     apiwikiname = wikiname
 
   # Get index of sections, then step through each one looking for a missing {{relist}} in the content
 
-  jsoninTOC = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=parse&page=" urlencodeawk(apiwikiname) "&prop=sections&format=json&formatversion=2&maxlag=5"))
+  jsoninTOC = http2var("https://en.wikipedia.org/w/api.php?action=parse&page=" urlencodeawk(apiwikiname) "&prop=sections&format=json&formatversion=2&maxlag=5")
 
   if( query_json(jsoninTOC, jsonaTOC) >= 0) {
 
@@ -283,9 +296,9 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
 
     for(s in arrTOC) {
 
-      if(jsonaTOC["parse","sections",s,"toclevel"] != 1) continue # skip if not a 1st level section ie. == <section> ==
+      if(jsonaTOC["parse","sections",s,"toclevel"] != 1) continue # skip if not a 1st level section ie. == <section> == 
 
-      jsoninSecW = sys2var("wget -q -O- " shquote("https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&rvlimit=1&titles=" urlencodeawk(apiwikiname) "&rvsection=" s "&format=json&formatversion=2&maxlag=5"))
+      jsoninSecW = http2var("https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvslots=main&rvlimit=1&titles=" urlencodeawk(apiwikiname) "&rvsection=" s "&format=json&formatversion=2&maxlag=5")
 
       if( query_json(jsoninSecW, jsonaSecW) >= 0) {
 
@@ -318,13 +331,13 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
 
           # Determine if line-break needed between body of text and template
           i = splitn(arrSecW["1"], a)
-          if(empty(a[i]))
+          if(empty(a[i])) 
             mid = ""
           else
             mid = "\n"
 
           # Add the template, check and log if error
-          out = arrSecW["1"] mid "\n{{reflist-talk}}"
+          out = arrSecW["1"] mid "\n{{reflist-talk}}" 
           origWS = wikisource
           wikisource = gsubs(arrSecW["1"], out, wikisource)
           if(origWS == wikisource) {
@@ -334,10 +347,13 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
           edcnt++
 
           # mis-match caused by transclusions
-          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*" regesc3(arrTOC[s]))) {
+          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*" regesc3(arrTOC[s]))) { 
             arrTOC[s] = strip(a[1])
             gsub(/^[=]{1,2}[ ]*|[ ]*[=]{1,2}$/, "", arrTOC[s])
           }
+
+          # remove any "[[" and "]]" in title#sectionname otherwise it renders incorrectly
+          gsub(/([[]{2}|[]]{2})/, "", arrTOC[s])
 
           if(empty(summary))
             summary = "{{[[Template:reflist-talk|reflist-talk]]}} to [[" urlencodeawk(apiwikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
@@ -354,16 +370,17 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
       if(edcnt > 1)
         summary = "Add " edcnt " {{[[Template:reflist-talk|reflist-talk]]}} (via [[User:GreenC bot/Job 8|reftalk]] bot)"
       else
-        summary = "Add 1 {{[[Template:reflist-talk|reflist-talk]]}} (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+        summary = "Add 1 {{[[Template:reflist-talk|reflist-talk]]}} (via [[User:GreenC bot/Job 8|reftalk]] bot)"      
     }
     else {
       if(edcnt > 1)
         summary = "Add " edcnt " " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
       else
-        summary = "Add " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"
+        summary = "Add " summary " (via [[User:GreenC bot/Job 8|reftalk]] bot)"      
     }
 
     upload(wikisource, apiwikiname, summary, G["log"], BotName, "en")
+
   }
 }
 
@@ -374,9 +391,60 @@ function addreftalk(wikisource, wikiname,  jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,
 function loadtemplates(  i,a,respace) {
 
   for(i = 1; i <= splitn(G["static"] "templates", a, i); i++)
-    G["templates"] = G["templates"] "|" regesc3(a[i]) "|" regesc3("template:" a[i])
+    G["templates"] = G["templates"] "|" regesc3(a[i]) "|" regesc3("template:" a[i])   
   gsub(/^[|]|[|]$/, "", G["templates"])
   G["templates"] = "([{][{][ \\n]*[ ]*(" G["templates"] "))|([<][ ]*references)"
+
+}
+
+#
+# Convert a date-eight (20120101) to Unix timestamp (UTC)
+#
+function d82unix(s) {
+  return strftime("%s", mktime(substr(s, 1, 4) " " substr(s, 5, 2) " " substr(s, 7, 2) " 0 0 0"), 1)
+}
+
+#
+# Return last revision timestamp (unix time UTC) for given article
+#  Has 4 seconds and 1 try to get it, otherwise return "" 
+#  No error-checking, fast as possible
+#
+function laststamp(article,  jsonin,url,d,a,command,ts) {
+
+  url = "https://en.wikipedia.org/w/api.php?action=query&prop=revisions&titles=" urlencodeawk(article) "&rvslots=*&rvprop=timestamp&format=json"
+
+  if (url ~ /'/)
+       gsub(/'/, "%27", url)
+  if (url ~ /’/)
+       gsub(/’/, "%E2%80%99", url)
+
+  command = Exe["timeout"] " 4s " Exe["wget"] Wget_opts " -q -O- " shquote(url)
+  jsonin = sys2var(command)
+
+  CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+
+  # "timestamp":"2019-09-11T16:02:20Z"
+  if(match(jsonin, /"timestamp":"[^"]+["]/, d)) {
+    split(d[0], a, /"/)
+    ts = d82unix(gsubi("[-]", "", substr(a[4],1,10)))
+    if(length(ts) > 9 && isanumber(ts))
+      return int(ts)
+    else {
+      print "Warning laststamp: unable to convert timestamp (" article ") for (" a[4] ") into (" ts ") ---- " CurTime >> G["log"] "syslog"
+      close(G["log"] "syslog")
+      return ""
+    }
+  }
+
+  if(match(jsonin, /"missing":/)) {
+    print "Warning laststamp: missing talk page (" article ") ---- " CurTime >> G["log"] "syslog"
+    close(G["log"] "syslog")
+    return ""
+  }
+
+  print "Warning laststamp: timeout revisions API (" article ") for (" command ") ---- " CurTime >> G["log"] "syslog"
+  close(G["log"] "syslog")
+  return "" 
 
 }
 
