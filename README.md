@@ -6,101 +6,189 @@ MIT License
 
 Info
 ========
-Reftalk is a Wikipedia bot that checks talks pages for instances where the template {{reftalk}} would be useful. It adds it to multiple sections as needed.
+Reftalk is a Wikipedia bot that adds `{{reflist-talk}}` to talk page sections that need one.
+
+A talk page section containing `<ref>` tags but no `<references />` or equivalent renders
+its citations in an auto-generated list at the foot of the page, detached from the
+discussion they belong to. Reftalk finds those sections and adds `{{reflist-talk}}` at the bottom of that section.
+
+It also removes empty `<ref></ref>` tags. Named ones (`<ref name="x"></ref>`) are left alone.
 
 See [WP:Bots/Requests for approval/GreenC bot 8](https://en.wikipedia.org/wiki/Wikipedia:Bots/Requests_for_approval/GreenC_bot_8)
+and the run history at [User:GreenC bot/Job 8](https://en.wikipedia.org/wiki/User:GreenC_bot/Job_8).
+
+How it decides
+========
+For each talk page it compares two counts:
+
+* how many reference lists the page actually renders
+* how many explicit reflist templates its wikitext contains
+
+If the first is larger, something is rendering without a template, and the bot walks the
+page section by section to find where.
+
+The rendered count comes from `action=parse`
 
 Requirements
 ========
-* GNU Awk 4.1+
-* [BotWikiAwk](https://github.com/greencardamom/BotWikiAwk) (version Jan 2019 +)
+* GNU Awk 5.4+
+* [BotWikiAwk](https://github.com/greencardamom/BotWikiAwk) - provides the libraries,
+  `wikiget` (OAuth API access) and `allpages.awk` (article list builder). Requires a version
+  from September 2026+ which includes `bin/allpages.awk`
+* A user account with bot flag permissions
+
+All API reads go through `wikiget -U`, which carries OAuth credentials. That is not only politeness: the OAuth account holds 
+`apihighlimits`, so a request returns 500 titles instead of 50. This is optional however, you can use wikiget without OAuth but it 
+will be slower and possibly more time outs. Without OAuth, set `G["apibatch"] = 50`
 
 Installation
 ========
 
-1. Install BotWikiAwk and follow setup instructions, including adding OAuth credentials to wikiget.
+1. Install BotWikiAwk and follow its setup, including OAuth credentials for wikiget.
 
-2. Clone Reftalk for example:
-	git clone https://github.com/greencardamom/Reftalk
+2. Clone Reftalk:
 
-3. Edit ~/BotWikiAwk/lib/botwiki.awk
+		git clone https://github.com/greencardamom/Reftalk
 
-	A. Set local URLs in section #1 and #2 
+2a. **This repository is configured for the bot as it runs on en.wikipedia under
+    User:GreenC.** Every value that identifies an operator or a wiki is collected at the
+    top of each program, under a `---- per-wiki ----` banner. Nothing outside those
+    blocks needs editing. See Configuring below.
 
-	B. Create a new 'case' entry in section #3, adjust the Home bot path created in step 3:
+3. Create `dat/` and `log/` under the home path.
 
-		case "reftalk":                                             # Custom bot paths
-			Home = "/data/project/projectname/Reftalk/"         # path ends in "/"
-			Agent = UserPage " (ask me about " BotName ")"
-			break
+4. Follow `static/0README` to build `static/templates` - the templates the bot treats as
+   an existing reflist. The list in this repo is of en.wikipedia template names.
 
-	C. Add a new entry in section #10 (inside the statement if(BotName != "makebot") {} )
+5. Set both programs executable and check the shebang points at your awk.
 
-		if(BotName !~ /reftalk/) {
-			delete Config
-			readprojectcfg()
-		}
+Configuring
+========
 
-4. Follow instructions in ~/Reftalk/static/0README to download the list of templates the bot will ignore
-5. Set ~/Reftalk/reftalk to mode 750, set the first shebang line to location of awk
+Both programs carry the same identity block at the very top:
+
+		home      = /path/to/reftalk/            # path ends in "/"
+		emailfp   = /path/to/secrets/myname.email
+		userid    = User:MY_NAME
+
+`emailfp` points at a file containing a single line, your email address. It is read at
+run time, so the address stays out of the source and out of git.
+
+`reftalk.awk`, under `---- per-wiki ----`:
+
+		G["hostname"]  "en"                      # wikiget -l target
+		G["domain"]    "wikipedia.org"           # wiki is <hostname>.<domain>
+		G["template"]  "reflist-talk"            # the template the bot adds
+		G["botpage"]   "User:GreenC bot/Job 8"   # credited in every edit summary
+		G["re1"]       "^(Wikipedia talk[:]|User talk[:])"
+
+`G["template"]` must exist on the target wiki. {{reflist-talk}} has interwiki versions on
+55 wikis, but check the local name and that its behaviour matches.
+
+`G["re1"]` matches titles that are *already* a talk page, which are worked on directly
+rather than via their `Talk:` page. These are English namespace names - on de.wikipedia
+it would be `^(Wikipedia Diskussion[:]|Benutzer Diskussion[:])`.
+
+`cron-reftalk.awk`, under `---- per-wiki ----`:
+
+		G["hostname"]  "en"
+		G["domain"]    "wikipedia.org"
+		G["jobpage"]   "User:GreenC bot/Job 8"   # "" to keep no public run table
+		G["minpages"]  5000000                   # sanity floor for a rebuilt list
+
+Set `G["jobpage"]` to your own page, or to `""` to disable it - the cycle then touches no
+page other than the talk pages themselves.
+
+`G["minpages"]` is an en.wikipedia article count sanity check. A new list smaller than this aborts the
+cycle with the previous list left intact, on the theory that a short crawl means a broken
+one. On a smaller wiki every cycle would abort until this is lowered.
+
+BotWikiAwk is also operator-specific
+========
+The framework underneath has its own hardcoded values, which a fresh install must change:
+
+		lib/botwiki.awk   StopButton, UserPage   - point at User:GreenC bot's pages
+		lib/syscfg.awk    Exe["from_email"], Exe["to_email"]
+
+`StopButton` is the page the bot polls to decide whether it may edit - leaving it pointed
+at another operator's page means your bot stops when theirs does.
 
 Running
 ========
 
-1. Download a complete list of "all-pages" (takes a while)
+Everything below is driven by `cron-reftalk.awk`, which performs one complete cycle:
 
-     A. On Toolforge:
+		archive the previous run's logs
+		build a fresh article list
+		validate it
+		install it and record the cutoff date
+		run reftalk
+		update the public run table
 
-       /usr/bin/qsub -l mem_free=2G,h_vmem=2G -cwd -sync y -e /data/project/botwikiawk/Reftalk/dat/wikiget.stderr -o /data/project/botwikiawk/Reftalk/dat/all-pages /data/project/botwikiawk/BotWikiAwk/bin/wikiget -A -t 2 -k 0
+		./cron-reftalk.awk              # one full cycle
+		./cron-reftalk.awk -d           # dry run: log every step, execute none
+		./cron-reftalk.awk -s 20250901  # force a cutoff date
+		./cron-reftalk.awk -h           # usage
 
-     B. On other servers:
+From cron, run quarterly:
 
-       wikiget -A -t 2 -k 0 > /data/project/botwikiawk/Reftalk/dat/all-pages
+		AWKPATH=.:/path/to/BotWikiAwk/lib:/usr/share/awk
+		PATH=...:/path/to/BotWikiAwk/bin
+		0 3 1 1,4,7,10 * cd /path/to/reftalk && ./cron-reftalk.awk
 
-2. Configure settings for the run:
+A cycle takes about 1.5 days for en.wikipedia. It refuses to start if a
+previous cycle, reftalk, or allpages is still running, so a cron firing on top of a run
+still in progress is a no-op rather than two workers on the same state files.
 
-     Modify reftalk.awk main()
+The cutoff date
+========
+Reftalk skips any talk page not edited since the previous run. That date comes from, in
+order of precedence:
 
-       If testing a single article
-         bm = 0
-         sp = "Siberian Tiger"
-       If testing a range (eg. first 10,000 pages from all-pages):
-         bm = 0
-         sp = 0
-         bz=1000, sz=0, ez=10000
-       If running the complete "all-pages":
-         bm = 1
+1. `-s YYYYMMDD` manually set via `cron-reftalk`
+2. the mtime of the `dat/all-pages` being replaced - automatically determined
+3. `2001-01-15`, the launch of Wikipedia, when there is no previous list - so a first run
+   sweeps everything
 
-3. Run reftalk
+Whichever wins is written to `dat/laststamp`, which `reftalk` reads at startup. A run with
+the wrong cutoff is not an error - it silently does nothing.
 
-     If running on Toolforge from the command-line:
+Mail
+========
+* `NOTIFY: cron-reftalk run N started` - once a cycle is committed and reftalk launches
+* `NOTIFY: reftalk has completed processing all articles!` - on a clean finish
+* `NOTIFY: cron-reftalk FAILED` / `aborted` - anything else
 
-       /usr/bin/jsub -once -quiet -N cron-tools.botwikiawk-1 -l mem_free=100M,h_vmem=200M -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -v "AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib" -v "PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin" -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
+The start mail matters for an unattended quarterly job: a cron that never fires at all
+otherwise looks exactly like a run quietly in progress.
 
-     If running on Toolforge from cron, the crontab would contain:
+Stopping and restarting
+========
+Stop it with [User:GreenC bot/button](https://en.wikipedia.org/wiki/User:GreenC_bot/button),
+or kill the process - both are safe.
 
-       SHELL=/bin/bash
-       PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin
-       AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib
-       MAILTO= an email address for reporting when cron runs (this is disabled with -quiet)
-       HOME=/data/project/botwikiawk
-       LANG=en_US.UTF-8
-       LC_COLLATE=en_US.UTF-8
-       0,5,10,15,20,25,30,35,40,45,50,55 * * * * /usr/bin/jsub -once -continuous -quiet -N cron-tools.botwikiawk-1 -l mem_free=100M,h_vmem=200M -e /data/project/botwikiawk/Reftalk/reftalk.stderr -o /data/project/botwikiawk/Reftalk/reftalk.stdout -v "AWKPATH=.:/data/project/botwikiawk/BotWikiAwk/lib" -v "PATH=/sbin:/bin:/usr/sbin:/usr/local/bin:/usr/bin:/data/project/botwikiawk/BotWikiAwk/bin" -wd /data/project/botwikiawk/Reftalk /data/project/botwikiawk/Reftalk/reftalk.awk
+Stopping and restarting picks up where it left off. `log/all-pages.done` records each 1000-article block and `log/all-pages.offset` 
+the position within a block; the last block is re-done, which is harmless because `reftalk` is idempotent. A page it already fixed now 
+has the template. Restarts are logged to `log/restart`.
 
-     ie. check every 5 minutes it is still running and restart if not. 
+Logs
+========
+Under `log/`, previous runs are archived to `.<date>` at the start of each cycle:
 
-     If running from anywhere else (home server etc):
+		discovered        pages edited
+		error             sections skipped, with the reason
+		syslog            talk pages that do not exist, API warnings
+		restart           each resume
+		all-pages.done    blocks completed - the resume point
+		all-pages.offset  position within the current block
+		cron-reftalk.log  the cycle itself
+		allpages.log      article list build
 
-       ./reftalk.awk > /data/project/botwikiawk/Reftalk/reftalk.stdout
+Files
+========
 
-4. Monitor ~/Reftalk/logs 
-
-5. To stop and restart
-
-     To stop on Toolforge
-
-       qstat  (display the job number)
-       qdel <job #>
-
-     To restart, see step #3. It will pick up where it left off. Restarts logged in ~/log/restarts
+		reftalk.awk       the bot
+		cron-reftalk.awk  unattended cron cycle driver
+		static/templates  templates counted as an existing reflist
+		dat/all-pages     the article list, rebuilt each cycle
+		dat/laststamp     cutoff date for the current run
