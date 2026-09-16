@@ -60,6 +60,33 @@ BEGIN { # Bot cfg
   G["template"] = "reflist-talk"
   G["botpage"]  = "User:GreenC bot/Job 8"
 
+  # The bot's own template, for removal - the canonical name plus every redirect that
+  # resolves to it, from prop=redirects on Template:Reflist-talk. Deliberately narrower
+  # than G["templates"], which covers ~108 unrelated reflist variants that are somebody
+  # else's markup. [ _] because a template name takes either
+  G["tplalias"] = "reflist-talk|inlineref|realist-talk|ref[ _]talk|ref-talk|reference[ _]talk" \
+                  "|reflist[ _]talk|reflist-quote|reflist-section|reflist-talkpage|reflisttalk|reftalk|rlt" \
+                  "|rtalk|section[ _]references|section[ _]reflist|section-ref|talk[ _]page[ _]ref" \
+                  "|talk[ _]page[ _]reference|talk[ _]page[ _]reflist|talk[ _]page[ _]refs" \
+                  "|talk[ _]page-reflist|talk[ _]ref|talk[ _]reference|talk[ _]references|talk[ _]reflist" \
+                  "|talk[ _]refs|talk-ref|talk-reflist|talk-refs|talkpageref|talkref|talkreflist|talkrefs" \
+                  "|tp[ _]ref|tp[ _]reflist|tp[ _]refs|tp-ref|tp-reflist|tp-refs|tpreflist|tref"
+
+  # Matches the whole call, not just up to a boundary character - this is used to delete
+  # text, so a pattern ending at the first "}" leaves the second one behind. The optional
+  # parameter group keeps {{reflist-talk|close=yes}} matching, while requiring [}][}]
+  # stops {{reflist-talk-collapsed}} (a different template) matching as a prefix
+  G["tplre"] = "[{][{][ ]*(" G["tplalias"] ")[ ]*([|][^{}]*)?[}][}]"
+
+  # Notelist-talk is a different template - it lists {{efn}} notes, not refs - but it is
+  # built from the same wikitext and renders the same <div class="reflist-talk">, so it
+  # is indistinguishable in the output once its box is empty. Counted here so the boxes
+  # on a page can still be lined up with the calls that produced them, never removed
+  G["nlalias"] = "notelist-talk|nlt|notelist[ _]talk|talk[ _]notelist|talknote|tnote"
+
+  # Only the opening of a call - findcalls() walks the braces from here to find its end
+  G["allstart"] = "[{][{][ ]*(" G["tplalias"] "|" G["nlalias"] ")[ ]*[|}]"
+
   # Titles already in a talk namespace, which are worked on directly rather than via
   # their Talk: page. These are the English namespace names - a different language wiki
   # needs its own (de: "Wikipedia Diskussion:|Benutzer Diskussion:")
@@ -132,7 +159,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 
       if(!sp) { # batch mode
 
-        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+        CurTime = curtime()
 
         command = Exe["tail"] " -n +" z " " G["dat"] "all-pages | " Exe["head"] " -n " bz " > " G["dat"] "runpages.new"
         sys2var(command)
@@ -151,7 +178,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 
       else {  # single page mode
 
-        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+        CurTime = curtime()
 
         reftalk(getrendered(sp), sp)
         exit 0
@@ -188,7 +215,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
         exit 0
       }
 
-      CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+      CurTime = curtime()
       print CurTime " ---- Bot (re)start (" startpoint "-" startpoint + 999 ")" >> G["log"] "restart"
       close(G["log"] "restart")
     }
@@ -222,7 +249,7 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
           endall = 1
 
         # Log the block at all-pages.done
-        CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+        CurTime = curtime()
         print bl "-" bl+999 " " CurTime >> G["log"] "all-pages.done"
         close(G["log"] "all-pages.done")
 
@@ -268,9 +295,11 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
           }
 
           # Without a <ref> nothing can render a reference list, so reftalk() would
-          # abort on HTML that has not been fetched yet
+          # abort on HTML that has not been fetched yet. A page carrying the template
+          # but no <ref> is the other case worth the fetch: every template on it is
+          # orphaned, which is what archiving a section leaves behind
           fp = wikisrc[apiname]
-          if(index(fp, "<ref") == 0)
+          if(index(fp, "<ref") == 0 && !match(fp, G["tplre"]))
             continue
 
           # Run bot on given article title
@@ -293,18 +322,36 @@ function main(  i,a,j,bz,sz,ez,sp,z,command,dn,bm,la,startpoint,offset,endall,bl
 }
 
 #
+# Log timestamp
+#
+#  strftime() rather than forking date - this runs per section on every edited page
+#
+function curtime() {
+
+  return strftime("%Y%m%d-%H:%M:%S")
+
+}
+
+#
 # Determine if there is a missing reflist template anywhere on the page
 #
 #  wikihtml is the rendered page, as the raw action=parse JSON from getrendered().
 #  It is used only to count rendered reference lists, so the JSON is never parsed -
 #  G["reflist"] tolerates JSON's escaped quotes and matches the markup either way.
 #
-function reftalk(wikihtml, wikiname, wikisource,   tfp,i,j,k,l,fp) {
+function reftalk(wikihtml, wikiname, wikisource,   tfp,i,j,k,l,t,fp) {
+
+  # A failed request or an API error body carries no rendered output at all, which reads
+  # as every template on the page being dead. Bail out rather than act on it
+  if(empty(wikihtml) || index(wikihtml, "\"text\":") == 0) {
+    CurTime = curtime()
+    print wikiname " ---- " CurTime " ---- no rendered HTML from API, page skipped" >> G["log"] "error"
+    close(G["log"] "error")
+    return 0
+  }
 
   tfp = stripwikicomments(wikihtml)
   j = gsub(G["reflist"], "", tfp)
-  if(j == 0)           # abort early - no refs on page
-    return 0
 
   # batchcontent() already has it in the all-pages path; single page mode does not
   if(!empty(wikisource))
@@ -313,20 +360,304 @@ function reftalk(wikihtml, wikiname, wikisource,   tfp,i,j,k,l,fp) {
     fp = sys2var(Exe["wikiget"] " -w " shquote(apititle(wikiname)) )
 
   tfp = stripnowikicom(fp)
-  if(gsub(G["templates"], "", tfp) < j) {
+  t = gsub(G["templates"], "", tfp)
+
+  if(j == 0 && t == 0)   # nothing rendered and nothing declared
+    return 0
+
+  if(t < j) {
     addreftalk(fp, wikiname)
     return 1
   }
+
+  # Orphans are read off the rendered output rather than inferred from t > j, so a page
+  # carrying a dead template can be caught even when the counts balance. The index() is
+  # only a prefilter - the template's stylesheet puts the class in the HTML either way
+  if(index(wikihtml, "reflist-talk") > 0)
+    return findorphans(wikihtml, fp, wikiname, j)
+
   return 0
+
+}
+
+#
+# Delete the bot's templates that rendered nothing
+#
+#  The template emits <div class="reflist-talk"> once per call, holding a list only when
+#  it had something to list. That box is the unit, not the about="#mwtNN" marker naming
+#  the template: Parsoid puts the marker on the first element a transclusion produces,
+#  which is usually the stylesheet, so most boxes carry no marker at all.
+#
+#  Boxes come back in document order and are matched to the wikitext by position, which
+#  the counts have to agree on first. Only a reordering that moved a dead call onto a
+#  live one's position could mislead it, since what gets removed is a set of positions
+#  and a set is unchanged by reversing it.
+#
+#  Only the bot's own aliases are ever removed - G["templates"] carries ~109 names and the
+#  others are somebody else's markup, left alone even when orphaned
+#
+function findorphans(wikihtml, wikisource, wikiname, j,   s, n, i, r, dpos, dead, nlive,
+                     ntpl, cs, cl, cm, out, prev, pre, removed, summary) {
+
+  CurTime = curtime()
+
+  n    = 0
+  s    = wikihtml
+  dpos = 0
+
+  while(match(s, /[<]div class=[\\]?"reflist-talk[\\]?"/)) {
+
+    dpos += RSTART + RLENGTH - 1
+    s = substr(s, RSTART + RLENGTH)
+
+    r = boxhaslist(substr(wikihtml, dpos + 1))
+    if(r < 0) {
+      # -2 is a box with its title outside it, which happens when the call sits inline on
+      # an indented line: the parser cannot put a div inside that, so it closes the div
+      # empty and hoists the real output - list included - out as siblings. Reading the
+      # div alone would call a working template an orphan
+      print wikiname " ---- " CurTime " ---- orphan skipped: " (r == -2 ? "output hoisted out of its box" : "unterminated output box") >> G["log"] "error"
+      close(G["log"] "error")
+      return 0
+    }
+
+    n++
+    dead[n] = (r == 0)
+  }
+
+  if(n == 0)
+    return 0
+
+  ntpl = findcalls(wikisource, cs, cl, cm)
+
+  # One wikitext call per box, counting both families since both render one - otherwise
+  # the two cannot be lined up by position at all. A template inside <nowiki> or a
+  # comment, or one arriving through another transclusion, lands here and is left alone
+  if(ntpl != n) {
+    print wikiname " ---- " CurTime " ---- orphan skipped: " ntpl " calls, " n " boxes" >> G["log"] "error"
+    close(G["log"] "error")
+    return 0
+  }
+
+  nlive = 0
+  for(i = 1; i <= n; i++)
+    if(!dead[i])
+      nlive++
+
+  # Guards against the markup this reads having changed under us. More boxes holding a
+  # list than the page renders is impossible, and a page that renders a list at all has
+  # to contain the cite_note the boxes are tested for
+  if(nlive > j || (j > 0 && index(wikihtml, "cite_note") == 0)) {
+    print wikiname " ---- " CurTime " ---- orphan skipped: " nlive " live of " n " boxes, " j " rendered" >> G["log"] "error"
+    close(G["log"] "error")
+    return 0
+  }
+
+  removed = 0
+  out     = ""
+  prev    = 1
+
+  for(i = 1; i <= ntpl; i++) {
+
+    pre  = substr(wikisource, prev, cs[i] - prev)
+    prev = cs[i] + cl[i]
+
+    # A dead notelist-talk box is somebody else's orphan - it still has to be walked past
+    # so the positions stay aligned, but it is never the one removed
+    if(dead[i] && cm[i]) {
+      # Take the newlines addreftalk() inserted with it, longest first, so the spacing
+      # around the call closes up rather than leaving a gap
+      if(!sub(/[\n][\n]$/, "", pre))
+        sub(/[\n]$/, "", pre)
+      removed++
+    }
+    else
+      pre = pre substr(wikisource, cs[i], cl[i])
+
+    out = out pre
+  }
+
+  wikisource = out substr(wikisource, prev)
+
+  if(removed == 0)
+    return 0
+
+  print wikiname " ---- " CurTime " ---- orphan removed: " removed " of " n " boxes, " j " rendered" >> G["log"] "syslog"
+  close(G["log"] "syslog")
+
+  summary = "Remove orphaned {{[[Template:" G["template"] "|" G["template"] "]]}} (via [[" G["botpage"] "|" BotName "]] bot)"
+  upload(wikisource, apititle(wikiname), summary, G["log"], BotName, G["hostname"])
+
+  return 1
+
+}
+
+#
+# Locate every call of either family, in document order
+#
+#  Fills cs/cl with the start and length of each call and cm with 1 when it is one of
+#  ours. Brace-balanced rather than a regex: a parameter can hold whole templates, as
+#  {{reflist-talk|refs=<ref>{{Citation |...}}</ref>}} does on 146 talk pages, and a
+#  pattern that stops at the first "}}" would measure those calls short
+#
+function findcalls(src, cs, cl, cm,   n, pos, s, len, hit, nm, k, ncom, comstart, comend, incom) {
+
+  ncom = commentspans(src, comstart, comend)
+
+  n   = 0
+  pos = 1
+  s   = src
+
+  while(match(s, G["allstart"])) {
+
+    pos += RSTART - 1
+    s    = substr(s, RSTART)
+
+    len = balancedlen(substr(s, 1, 32768))
+    if(len == 0)      # never closed within reach - leave the page alone
+      return -1
+
+    # Template:Reflist-talk ships boilerplate that names the template inside an HTML
+    # comment, on 399 talk pages. Those names render nothing, so counting them would
+    # leave more calls than boxes and strand the page
+    incom = 0
+    for(k = 1; k <= ncom; k++) {
+      if(pos >= comstart[k] && pos < comend[k]) {
+        incom = 1
+        break
+      }
+    }
+    if(incom) {
+      pos += len
+      s    = substr(s, len + 1)
+      continue
+    }
+
+    hit = substr(s, 1, len)
+    nm  = hit
+    sub(/^[{][{][ ]*/, "", nm)
+    if(index(nm, "|") > 0)
+      nm = substr(nm, 1, index(nm, "|") - 1)
+    else
+      sub(/[}][}]$/, "", nm)
+    gsub(/_/, " ", nm)
+    nm = tolower(strip(nm))
+
+    n++
+    cs[n] = pos
+    cl[n] = len
+    cm[n] = (nm ~ "^(" G["tplalias"] ")$")
+
+    pos += len
+    s    = substr(s, len + 1)
+  }
+
+  return n
+
+}
+
+#
+# Start and end offset of every HTML comment in src, as cs[n]/ce[n]. Returns the count
+#
+#  One patsplit() pass rather than repeated index() scans, so a page thick with comments
+#  does not turn this into a quadratic walk. An unclosed comment runs to end of text,
+#  which is what the parser does with it too
+#
+function commentspans(src, cs, ce,   ntok, tok, sep, i, pos, n, open) {
+
+  ntok = patsplit(src, tok, /<[!][-][-]|[-][-]>/, sep)
+  pos  = length(sep[0]) + 1
+  n    = 0
+  open = 0
+
+  for(i = 1; i <= ntok; i++) {
+    if(tok[i] == "<!--") {
+      if(!open) {
+        open = 1
+        cs[++n] = pos
+      }
+    }
+    else if(open) {
+      open  = 0
+      ce[n] = pos + length(tok[i])
+    }
+    pos += length(tok[i]) + length(sep[i])
+  }
+
+  if(open)
+    ce[n] = length(src) + 1
+
+  return n
+
+}
+
+#
+# Length of the brace-balanced call starting at the front of s, 0 if it never closes
+#
+function balancedlen(s,   ntok, tok, sep, i, d, len) {
+
+  ntok = patsplit(s, tok, /[{][{]|[}][}]/, sep)
+  d    = 0
+  len  = length(sep[0])
+
+  for(i = 1; i <= ntok; i++) {
+    len += 2
+    if(tok[i] == "{{")
+      d++
+    else {
+      d--
+      if(d == 0)
+        return len
+    }
+    len += length(sep[i])
+  }
+
+  return 0
+
+}
+
+#
+# Did this rendered box produce a list - 1 yes, 0 no, -1 the box never closed
+#
+#  cite_note is the test, not mw-references: a colwidth= orphan still emits an empty
+#  mw-references-columns wrapper, which would otherwise read as a live list. Boxes run to
+#  80k on a busy page, so the walk is one patsplit() pass rather than a bounded window
+#
+function boxhaslist(win,   ntok, tok, sep, i, d, title) {
+
+  ntok = patsplit(win, tok, /[<]div[ >]|[<][\/]div[ ]*[>]/, sep)
+
+  if(index(sep[0], "cite_note"))
+    return 1
+  if(index(sep[0], "reflist-talk-title"))
+    title = 1
+
+  d = 1
+  for(i = 1; i <= ntok; i++) {
+    if(substr(tok[i], 1, 2) == "</")
+      d--
+    else
+      d++
+    if(d == 0)
+      return (title ? 0 : -2)
+    if(index(sep[i], "cite_note"))
+      return 1
+    if(index(sep[i], "reflist-talk-title"))
+      title = 1
+  }
+
+  return -1
 
 }
 
 #
 # Go through each section checking for the canidate 
 #
-function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b,nempty,remcnt) {
+function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b,nempty,remcnt,origAll) {
 
-  if(wikiname !~ G["re1"]) 
+  origAll = wikisource
+
+  if(wikiname !~ G["re1"])
     apiwikiname = "Talk:" wikiname
   else 
     apiwikiname = wikiname
@@ -360,7 +691,7 @@ function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSec
 
         if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && match(stripnowikicom(arrSecW["1"]), /[<][ ]*\/[ ]*ref[ ]*[>]/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
 
-          CurTime = sys2var(Exe["date"] " +\"%Y%m%d-%H:%M:%S\"")
+          CurTime = curtime()
 
           # Remove empty <ref></ref>. Only the unnamed form: it names nothing so it can
           # never be a reuse, and renders as a Cite error. <ref name="x"></ref> is left
@@ -399,6 +730,11 @@ function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSec
 
           # Add the template, check and log if error. Search on origSec - wikisource
           # still holds the section as it was before the empty refs came out
+          #
+          # gsubs() replaces every occurrence of origSec in the whole page, not just the
+          # section it came from, so identical sections all get one. Harmless when they
+          # genuinely match, wrong if only one of them qualified. The fix is the orphan
+          # path's: splice by offset into wikisource rather than match on section text
           out = arrSecW["1"] mid "\n{{" G["template"] "}}"
           origWS = wikisource
           wikisource = gsubs(origSec, out, wikisource)
@@ -452,7 +788,10 @@ function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSec
       summary = summary " (via [[" G["botpage"] "|" BotName "]] bot)"
     }
 
-    upload(wikisource, apiwikiname, summary, G["log"], BotName, G["hostname"])
+    # Nothing replaced means nothing to save. Skips the null edit, and keeps a page whose
+    # wikitext arrived unusable from being written back over itself
+    if(wikisource != origAll)
+      upload(wikisource, apiwikiname, summary, G["log"], BotName, G["hostname"])
 
   }
 }
@@ -481,7 +820,13 @@ function loadtemplates(  i,a,n,respace) {
   }
 
   gsub(/^[|]|[|]$/, "", G["templates"])
-  G["templates"] = "([{][{][ \\n]*[ ]*(" G["templates"] "))|([<][ ]*references)"
+
+  # The trailing [|}\n] is load bearing. Without it a short entry matches as a prefix -
+  # "St" hit {{strong}}, {{stack}}, {{status}}; "Reference" hit {{references}}, which is
+  # a redirect to Template:Unreferenced and not a reference list at all. Every such hit
+  # inflates the template count, which silently suppresses adding a needed template and
+  # can open the orphan branch on a page that is perfectly healthy
+  G["templates"] = "([{][{][ \\n]*[ ]*(" G["templates"] ")[ ]*[|}\\n])|([<][ ]*references)"
 
 }
 
