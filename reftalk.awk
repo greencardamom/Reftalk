@@ -432,12 +432,11 @@ function findorphans(wikihtml, wikisource, wikiname, j,   s, n, i, r, dpos, dead
 
   # One wikitext call per box, counting both families since both render one - otherwise
   # the two cannot be lined up by position at all. A template inside <nowiki> or a
-  # comment, or one arriving through another transclusion, lands here and is left alone
-  if(ntpl != n) {
-    print wikiname " ---- " CurTime " ---- orphan skipped: " ntpl " calls, " n " boxes" >> G["log"] "error"
-    close(G["log"] "error")
+  # comment, or one arriving through another transclusion, lands here and is left alone.
+  # Unlogged: {{sources-talk}} and kin wrap reflist-talk, so fewer calls than boxes is
+  # normal on 500+ pages - an orphan inside one of those wrappers is never cleaned
+  if(ntpl != n)
     return 0
-  }
 
   nlive = 0
   for(i = 1; i <= n; i++)
@@ -445,9 +444,11 @@ function findorphans(wikihtml, wikisource, wikiname, j,   s, n, i, r, dpos, dead
       nlive++
 
   # Guards against the markup this reads having changed under us. More boxes holding a
-  # list than the page renders is impossible, and a page that renders a list at all has
-  # to contain the cite_note the boxes are tested for
-  if(nlive > j || (j > 0 && index(wikihtml, "cite_note") == 0)) {
+  # list than the page renders is impossible. Missing cite_note only means the markup
+  # moved if something on the page actually cites: a page citing nothing renders empty
+  # lists with no cite_note, and those boxes are orphans rather than a broken predicate.
+  # cite_ref is the inline marker's own anchor - "mw-ref" would match inside mw-references
+  if(nlive > j || (j > 0 && index(wikihtml, "cite_note") == 0 && index(wikihtml, "cite_ref") > 0)) {
     print wikiname " ---- " CurTime " ---- orphan skipped: " nlive " live of " n " boxes, " j " rendered" >> G["log"] "error"
     close(G["log"] "error")
     return 0
