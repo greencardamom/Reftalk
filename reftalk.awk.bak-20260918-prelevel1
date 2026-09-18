@@ -737,112 +737,9 @@ function stripemptyrefs(wikiname, wikisource,   re, labelre, src, out, chunk, n,
 }
 
 #
-# splitlevel2() - break a level-1 umbrella into the level-2 sections trapped under it
-#
-#  Parts land in a[] in order, the first holding the level-1 heading and whatever text
-#  precedes the first level-2. Headings deeper than two stay inside their parent, which
-#  is how MediaWiki hands a section its own subsections. Concatenating a[1..n] rebuilds
-#  the input byte for byte, so a part that nothing was added to is returned untouched
-#
-function splitlevel2(blob, a,   n, i, nl, line, first) {
-
-  nl = split(blob, line, "\n")
-  n  = 1
-  a[1] = ""
-  first = 1
-
-  for(i = 1; i <= nl; i++) {
-    if(i > 1 && line[i] ~ /^[=][=][^=].*[=][=][ \t]*$/) {
-      n++
-      a[n]  = ""
-      first = 1
-    }
-    a[n]  = a[n] (first ? "" : "\n") line[i]
-    first = 0
-  }
-
-  # put back the newline that split() took off the end of each part but the last
-  for(i = 1; i < n; i++)
-    a[i] = a[i] "\n"
-
-  return n
-
-}
-
-#
-# parttitle() - the heading a split part sits under, or fallback when it has none
-#
-function parttitle(part, fallback,   a, t) {
-
-  split(part, a, "\n")
-  t = a[1]
-
-  if(t !~ /^[ \t]*[=]+.*[=]+[ \t]*$/)
-    return fallback
-
-  gsub(/^[ \t]*[=]+[ \t]*|[ \t]*[=]+[ \t]*$/, "", t)
-
-  return empty(t) ? fallback : t
-
-}
-
-#
-# sectionadd() - append the template to one section, when that section needs one
-#
-#  res["text"] is the section, with the template on the end if it qualified, and comes
-#  back unchanged if it did not. res["added"] says which happened, res["title"] is the
-#  heading the edit summary should point at - not always the one the caller passed, as a
-#  transcluded section carries a different name in the wikitext than the TOC reports
-#
-function sectionadd(sectext, title, res,   a, i, mid, sbare, tail) {
-
-  res["text"]  = sectext
-  res["title"] = title
-  res["added"] = 0
-
-  sbare = stripnowikicom(sectext)
-
-  if(!match(sbare, /[<][ ]*ref[ ]*/) || !match(sbare, /[<][ ]*[\/][ ]*ref[ ]*[>]/) || match(sbare, G["templates"]))
-    return 0
-
-  # A part from splitlevel2() carries the newline that separated it from the section
-  # below. Set that aside before appending or the template lands hard against the next
-  # heading, which stops the heading rendering, and the blank lines stack up in front
-  # of it. Put it back after, so the spacing between sections is left as it was. A
-  # section straight from the API has no trailing newline, so this does nothing to it
-  tail = ""
-  if(match(sectext, /[\n][ \t\n]*$/)) {
-    tail    = substr(sectext, RSTART)
-    sectext = substr(sectext, 1, RSTART - 1)
-  }
-
-  # Determine if line-break needed between body of text and template
-  i = splitn(sectext, a)
-  if(empty(a[i]))
-    mid = ""
-  else
-    mid = "\n"
-
-  res["text"]  = sectext mid "\n{{" G["template"] "}}" tail
-  res["added"] = 1
-
-  # mis-match caused by transclusions
-  if(!match(sectext, "[=]{1,3}[ ]*" regesc3(title))) {
-    res["title"] = strip(a[1])
-    gsub(/^[=]{1,3}[ ]*|[ ]*[=]{1,3}$/, "", res["title"])
-  }
-
-  # remove any "[[" and "]]" in title#sectionname otherwise it renders incorrectly
-  gsub(/([[]{2}|[]]{2})/, "", res["title"])
-
-  return 1
-
-}
-
-#
 # Go through each section checking for the canidate 
 #
-function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b,origAll,part,nparts,res,newtitle,nadd,p) {
+function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSecW,jsonaSecW,arrSecW,s,a,mid,i,out,summary,edcnt,origWS,origSec,apiname,b,origAll) {
 
   origAll = wikisource
 
@@ -878,54 +775,57 @@ function addreftalk(wikisource, wikiname,    jsoninTOC,jsonaTOC,arrTOC,jsoninSec
         # print "title   = " arrTOC[s]
         # print "content = " arrSecW["1"]
 
-        CurTime = curtime()
+        if(match(stripnowikicom(arrSecW["1"]), /[<][ ]*ref[ ]*/) && match(stripnowikicom(arrSecW["1"]), /[<][ ]*\/[ ]*ref[ ]*[>]/) && ! match(stripnowikicom(arrSecW["1"]), G["templates"]) ) {
 
-        # stripemptyrefs() has already taken every empty <ref></ref> off the page, so
-        # what is left here is a section with real references
-        origSec = arrSecW["1"]
+          CurTime = curtime()
 
-        # A level-1 heading umbrellas every level-2 beneath it, so the API hands the lot
-        # back as one section. Split it and treat each level-2 as the section it would
-        # have been without the stray heading - anything deeper stays inside its parent,
-        # the way MediaWiki gives a section its own subsections
-        splitn(origSec "\n", b)
-        if(b[1] ~ /[^=][=]$/)
-          nparts = splitlevel2(origSec, part)
-        else {
-          nparts = 1
-          part[1] = origSec
-        }
+          # stripemptyrefs() has already taken every empty <ref></ref> off the page, so
+          # what is left here is a section with real references
+          origSec = arrSecW["1"]
 
-        out  = ""
-        nadd = 0
+          # Check for a level-1 section that umbrellas in all level-2's below it - log and skip
+          splitn(arrSecW["1"] "\n", b)
+          if(b[1] ~ /[^=][=]$/) {
+            print wikiname " ---- " CurTime " ---- Level-1 error in section \"" arrTOC[s] "\"" >> G["log"] "error"
+            continue
+          }
 
-        for(p = 1; p <= nparts; p++) {
-          if(sectionadd(part[p], (p == 1 ? arrTOC[s] : parttitle(part[p], arrTOC[s])), res))
-            newtitle[++nadd] = res["title"]
-          out = out res["text"]
-        }
-
-        if(nadd == 0)
-          continue
-
-        # gsubs() replaces every occurrence of origSec in the whole page, not just the
-        # section it came from, so identical sections all get one. Harmless when they
-        # genuinely match, wrong if only one of them qualified. The fix is the orphan
-        # path's: splice by offset into wikisource rather than match on section text
-        origWS = wikisource
-        wikisource = gsubs(origSec, out, wikisource)
-        if(origWS == wikisource) {
-          print wikiname " ---- " CurTime " ---- gsubs() failure" >> G["log"] "error"
-          continue
-        }
-
-        edcnt += nadd
-
-        for(p = 1; p <= nadd; p++) {
-          if(empty(summary))
-            summary = "{{[[Template:" G["template"] "|" G["template"] "]]}} to [[" urlencodeawk(apiwikiname) "#" urlencodeawk(newtitle[p]) "|#" newtitle[p] "]]"
+          # Determine if line-break needed between body of text and template
+          i = splitn(arrSecW["1"], a)
+          if(empty(a[i])) 
+            mid = ""
           else
-            summary = summary " and [[" urlencodeawk(apiwikiname) "#" urlencodeawk(newtitle[p]) "|#" newtitle[p] "]]"
+            mid = "\n"
+
+          # Add the template, check and log if error. Search on origSec - wikisource
+          # still holds the section as it was before the empty refs came out
+          #
+          # gsubs() replaces every occurrence of origSec in the whole page, not just the
+          # section it came from, so identical sections all get one. Harmless when they
+          # genuinely match, wrong if only one of them qualified. The fix is the orphan
+          # path's: splice by offset into wikisource rather than match on section text
+          out = arrSecW["1"] mid "\n{{" G["template"] "}}"
+          origWS = wikisource
+          wikisource = gsubs(origSec, out, wikisource)
+          if(origWS == wikisource) {
+            print wikiname " ---- " CurTime " ---- gsubs() failure" >> G["log"] "error"
+            continue
+          }
+          edcnt++
+
+          # mis-match caused by transclusions
+          if( ! match(arrSecW["1"], "[=]{1,2}[ ]*" regesc3(arrTOC[s]))) { 
+            arrTOC[s] = strip(a[1])
+            gsub(/^[=]{1,2}[ ]*|[ ]*[=]{1,2}$/, "", arrTOC[s])
+          }
+
+          # remove any "[[" and "]]" in title#sectionname otherwise it renders incorrectly
+          gsub(/([[]{2}|[]]{2})/, "", arrTOC[s])
+
+          if(empty(summary))
+            summary = "{{[[Template:" G["template"] "|" G["template"] "]]}} to [[" urlencodeawk(apiwikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
+          else
+            summary = summary " and [[" urlencodeawk(apiwikiname) "#" urlencodeawk(arrTOC[s]) "|#" arrTOC[s] "]]"
         }
       }
     }
@@ -967,14 +867,8 @@ function loadtemplates(  i,a,n,respace) {
     exit 1
   }
 
-  # MediaWiki reads a space and an underscore in a template name as the same character,
-  # so {{reflist talk}} and {{reflist_talk}} are one template. Matching only what the
-  # list literally says misses the other spelling, and the page then looks to have no
-  # template on it - which is an add on top of the one already there
   for(i = 1; i <= splitn(G["static"] "templates", a, i); i++) {
-    respace = regesc3(a[i])
-    gsub(/[ _]/, "[ _]", respace)
-    G["templates"] = G["templates"] "|" respace "|" "template[:]" respace
+    G["templates"] = G["templates"] "|" regesc3(a[i]) "|" regesc3("template:" a[i])
     n++
   }
 

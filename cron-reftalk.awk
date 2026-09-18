@@ -9,7 +9,9 @@
 # Replaces what used to be a by-hand sequence: archiving the logs, rebuilding the
 # article list, setting reftalk's cutoff date, and starting the crawl.
 #
+#   -f <file>      article list to use instead of crawling a fresh one
 #   -s <YYYYMMDD>  cutoff date, overriding every other source
+#   -j             leave the job table alone - for tests and one-off runs
 #   -d             dry run: log every step, execute none
 #   -h             usage
 #
@@ -94,10 +96,19 @@ BEGIN { # paths and thresholds
 BEGIN { # parse args and run
 
   Optind = Opterr = 1
-  while ((C = getopt(ARGC, ARGV, "ds:h")) != -1) {
+  while ((C = getopt(ARGC, ARGV, "df:js:h")) != -1) {
     opts++
     if (C == "d")
       P["dryrun"] = 1
+    else if (C == "j")
+      P["nojob"] = 1
+    else if (C == "f") {
+      P["listfile"] = Optarg
+      if (!checkexists(P["listfile"])) {
+        stdErr(BotName ": -f no such file: \"" P["listfile"] "\"")
+        exit 2
+      }
+    }
     else if (C == "s") {
       P["laststamp"] = Optarg
       if (P["laststamp"] !~ /^[0-9]{8}$/) {
@@ -125,11 +136,18 @@ function usage() {
 
   print BotName " - run a full reftalk cycle unattended"
   print ""
-  print "Usage: " BotName ".awk [-s YYYYMMDD] [-d] [-h]"
+  print "Usage: " BotName ".awk [-f <file>] [-s YYYYMMDD] [-j] [-d] [-h]"
   print ""
+  print "  -f <file>      article list to use instead of crawling a fresh one, for a"
+  print "                 backlog run off a dump scan. Sets the cutoff to " G["epoch"] " so"
+  print "                 nothing is passed over as unedited, and skips the size floor"
+  print "                 a crawled list has to clear."
   print "  -s <YYYYMMDD>  cutoff date for reftalk, overriding every other source."
   print "                 Otherwise the mtime of the list being replaced, or " G["epoch"]
   print "                 when there is no previous list."
+  print "  -j             leave " G["jobpage"] " alone - no In progress row"
+  print "                 at the start, no count at the end. For tests and one-off"
+  print "                 runs whose totals do not belong on the public record."
   print "  -d             dry run: log every step, execute none"
   print "  -h             this help"
   print ""
@@ -141,7 +159,7 @@ function usage() {
 #
 # main() - one cycle
 #
-function main(   other, adate, oldstamp, oldn, newn, rc, started, startep, ts, runno) {
+function main(   other, adate, oldstamp, oldn, newn, rc, started, startep, ts, runno, resume) {
 
   started = curtime()
   startep = systime()
@@ -166,42 +184,72 @@ function main(   other, adate, oldstamp, oldn, newn, rc, started, startep, ts, r
     return 0
   }
 
-  adate = archivedate()
+  # A cycle stopped part way through its list has its logs, list and cutoff all still
+  # in place, and all-pages.done holds the resume point. Setting up again would archive
+  # that away and send reftalk back to line 1, so the setup is skipped entirely and the
+  # crawl picks up where it stopped. Everything after it still runs, which is what puts
+  # the count on the job table
+  resume = interrupted()
 
-  # Roll this log before anything else writes to it, so each cycle gets a clean one
-  rollfile(G["wlog"], adate)
+  if (resume) {
 
-  logmsg("=== " BotName " " G["version"] " starting " started (P["dryrun"] ? " (DRY RUN)" : ""))
+    # The month on the job table is the month the cycle began in, not the one it was
+    # resumed in, so the In progress row started back then is the row filled in
+    startep = cyclestart(startep)
 
-  # The previous list's mtime becomes reftalk's cutoff: talk pages untouched since the
-  # last crawl cannot need anything. Read it before the list is replaced
-  oldstamp = 0
-  oldn = 0
-  if (checkexists(G["allpages"])) {
-    oldstamp = int(sys2var(Exe["date"] " -r " shquote(G["allpages"]) " +%s"))
-    oldn = nlines(G["allpages"])
-    logmsg("previous list: " oldn " titles, built " strftime("%Y-%m-%d", oldstamp, 1))
+    logmsg("=== " BotName " " G["version"] " resuming " started (P["dryrun"] ? " (DRY RUN)" : ""))
+    logmsg("an earlier cycle stopped mid-list - skipping setup, reftalk resumes from " lastblock())
+
+    if (!empty(P["listfile"]))
+      logmsg("note: -f is ignored while resuming - the installed list is kept")
+
+    newn = nlines(G["allpages"])
   }
-  else
-    logmsg("previous list: none")
 
-  newn = buildlist(oldn)
-  if (newn < 0)
-    return 0
+  else {
 
-  # Nothing destructive happens until the new list is in hand and has checked out
-  archivelogs(adate)
+    adate = archivedate()
 
-  ts = cutoff(oldstamp)
+    # Roll this log before anything else writes to it, so each cycle gets a clean one
+    rollfile(G["wlog"], adate)
 
-  if (!swaplist(ts))
-    return 0
+    logmsg("=== " BotName " " G["version"] " starting " started (P["dryrun"] ? " (DRY RUN)" : ""))
 
-  # Show the run as under way before it starts. Cosmetic, so a failure here is logged
-  # but does not stop the cycle
-  runno = startrow(startep)
+    # The previous list's mtime becomes reftalk's cutoff: talk pages untouched since the
+    # last crawl cannot need anything. Read it before the list is replaced
+    oldstamp = 0
+    oldn = 0
+    if (checkexists(G["allpages"])) {
+      oldstamp = int(sys2var(Exe["date"] " -r " shquote(G["allpages"]) " +%s"))
+      oldn = nlines(G["allpages"])
+      logmsg("previous list: " oldn " titles, built " strftime("%Y-%m-%d", oldstamp, 1))
+    }
+    else
+      logmsg("previous list: none")
 
-  notifystart(started, oldn, newn, ts, runno)
+    if (empty(P["listfile"]))
+      newn = buildlist(oldn)
+    else
+      newn = uselist()
+
+    if (newn < 0)
+      return 0
+
+    # Nothing destructive happens until the new list is in hand and has checked out
+    archivelogs(adate)
+
+    ts = cutoff(oldstamp)
+
+    if (!swaplist(ts))
+      return 0
+
+    # Show the run as under way before it starts. Cosmetic, so a failure here is logged
+    # but does not stop the cycle
+    runno = startrow(startep)
+
+    notifystart(started, oldn, newn, ts, runno)
+
+  }
 
   rc = runreftalk()
 
@@ -297,6 +345,11 @@ function jobwrite(b, m, summary,   out, cmd, res) {
 #
 function startrow(startep,   a, meta, b, m, i, when, line) {
 
+  if (P["nojob"]) {
+    logmsg("job table: left alone (-j)")
+    return 0
+  }
+
   if (empty(G["jobpage"]))
     return 0
 
@@ -346,6 +399,12 @@ function startrow(startep,   a, meta, b, m, i, when, line) {
 #  start mark failed - a new row is appended instead
 #
 function updatehistory(edited, startep,   a, meta, b, m, i, c, parts, when, done) {
+
+  # Checked here as well as in startrow(), which a resumed cycle never reaches
+  if (P["nojob"]) {
+    logmsg("job table: left alone (-j) - " commafy(edited) " pages not recorded")
+    return 1
+  }
 
   if (empty(G["jobpage"]))
     return 1
@@ -458,6 +517,48 @@ function running(re,   i, a, c, line, sp, pid, args, me, parent) {
 }
 
 #
+# interrupted() - 1 if a cycle was stopped part way through its list
+#
+#  reftalk writes endall as the last line of all-pages.done on reaching the end of the
+#  list. Any other last line means there is list still to walk
+#
+function interrupted(   d) {
+
+  if (!checkexists(G["donelog"]))
+    return 0
+
+  d = strip(sys2var(Exe["tail"] " -n 1 " shquote(G["donelog"])))
+
+  return (d !~ /endall/ && !empty(d))
+
+}
+
+#
+# lastblock() - the block reftalk will resume at, for the log line
+#
+function lastblock(   d) {
+
+  d = strip(sys2var(Exe["tail"] " -n 1 " shquote(G["donelog"])))
+  sub(/[ \t].*$/, "", d)
+
+  return (empty(d) ? "the start" : "block " d)
+
+}
+
+#
+# cyclestart() - unix time the interrupted cycle began, or fallback
+#
+function cyclestart(fallback,   d) {
+
+  d = sys2var(Exe["head"] " -n 1 " shquote(G["donelog"]))
+  if (match(d, /[0-9]{8}/))
+    return d82unix(substr(d, RSTART, RLENGTH))
+
+  return fallback
+
+}
+
+#
 # archivedate() - the date to stamp this cycle's archived logs with
 #
 #  The first line of all-pages.done is when the previous reftalk run began. Falls
@@ -560,6 +661,43 @@ function buildlist(oldn,   cmd, rc, n, floor) {
 }
 
 #
+# uselist() - install a supplied article list, returning its line count or -1 on failure
+#
+#  The -f path. No crawl and no size floor - a backlog list is meant to be small. Copied
+#  rather than moved so the caller's file survives the run
+#
+function uselist(   n) {
+
+  if (checkexists(G["newpages"])) {
+    logmsg("removing stale " basename(G["newpages"]))
+    if (!P["dryrun"])
+      sys2var(Exe["rm"] " -f " shquote(G["newpages"]))
+  }
+
+  n = nlines(P["listfile"])
+  if (n < 1) {
+    logmsg("ERROR: " P["listfile"] " is empty - keeping the previous list")
+    notifyfail(P["listfile"] " is empty")
+    return -1
+  }
+
+  logmsg("supplied list: " n " titles from " P["listfile"])
+
+  if (P["dryrun"])
+    return n
+
+  sys2var(Exe["cp"] " " shquote(P["listfile"]) " " shquote(G["newpages"]))
+  if (nlines(G["newpages"]) != n) {
+    logmsg("ERROR: could not stage " P["listfile"])
+    notifyfail("could not stage " P["listfile"])
+    return -1
+  }
+
+  return n
+
+}
+
+#
 # swaplist() - put the new list in place and record the cutoff reftalk will read
 #
 function swaplist(ts) {
@@ -597,6 +735,13 @@ function cutoff(oldstamp) {
   if (!empty(P["laststamp"])) {
     logmsg("cutoff from -s: " P["laststamp"])
     return d82unix(P["laststamp"])
+  }
+
+  # A supplied list is exactly the pages an mtime cutoff would pass over, so inheriting
+  # one would walk the whole list and act on nothing
+  if (!empty(P["listfile"])) {
+    logmsg("cutoff for the supplied list: " G["epoch"])
+    return d82unix(G["epoch"])
   }
 
   if (oldstamp)
