@@ -87,6 +87,7 @@ BEGIN { # paths and thresholds
 
   Exe["allpages"] = "allpages.awk"              # on PATH via ~/scripts
   Exe["reftalk"]  = G["home"] "reftalk.awk"
+  Exe["touch"]    = "/usr/bin/touch"            # not in syscfg.awk
 
   P["dryrun"] = 0
   P["laststamp"] = ""                           # -s, overrides everything below
@@ -141,7 +142,8 @@ function usage() {
   print "  -f <file>      article list to use instead of crawling a fresh one, for a"
   print "                 backlog run off a dump scan. Sets the cutoff to " G["epoch"] " so"
   print "                 nothing is passed over as unedited, and skips the size floor"
-  print "                 a crawled list has to clear."
+  print "                 a crawled list has to clear. The date of the list it replaces"
+  print "                 is kept, so a one-off run does not move the next cycle's cutoff."
   print "  -s <YYYYMMDD>  cutoff date for reftalk, overriding every other source."
   print "                 Otherwise the mtime of the list being replaced, or " G["epoch"]
   print "                 when there is no previous list."
@@ -240,7 +242,7 @@ function main(   other, adate, oldstamp, oldn, newn, rc, started, startep, ts, r
 
     ts = cutoff(oldstamp)
 
-    if (!swaplist(ts))
+    if (!swaplist(ts, oldstamp))
       return 0
 
     # Show the run as under way before it starts. Cosmetic, so a failure here is logged
@@ -700,11 +702,13 @@ function uselist(   n) {
 #
 # swaplist() - put the new list in place and record the cutoff reftalk will read
 #
-function swaplist(ts) {
+function swaplist(ts, oldstamp) {
 
   if (P["dryrun"]) {
     logmsg("  would install " basename(G["newpages"]) " as " basename(G["allpages"]))
     logmsg("  would write cutoff " strftime("%Y-%m-%d", ts) " to " basename(G["stampfp"]))
+    if (!empty(P["listfile"]) && oldstamp)
+      logmsg("  would keep the previous list's date, " strftime("%Y-%m-%d", oldstamp, 1))
     return 1
   }
 
@@ -713,6 +717,15 @@ function swaplist(ts) {
     logmsg("ERROR: could not install the new list")
     notifyfail("could not install the new list")
     return 0
+  }
+
+  # The next cycle reads this file's mtime as its cutoff. A supplied list is a one-off,
+  # so letting today's date stick would make that cycle pass over everything edited
+  # before this run - the bot's own recent work included. Put back the date of the list
+  # being replaced, which is what the cutoff is meant to mean
+  if (!empty(P["listfile"]) && oldstamp) {
+    sys2var(Exe["touch"] " -d @" oldstamp " " shquote(G["allpages"]))
+    logmsg("kept the previous list's date on " basename(G["allpages"]) " - " strftime("%Y-%m-%d", oldstamp, 1))
   }
 
   print ts > G["stampfp"]
